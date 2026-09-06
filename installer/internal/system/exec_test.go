@@ -269,6 +269,102 @@ func TestCopyDir(t *testing.T) {
 	})
 }
 
+func TestPreserveFishUserConfig(t *testing.T) {
+	t.Run("preserves an existing config.fish into conf.d", func(t *testing.T) {
+		fishDir := t.TempDir()
+		personal := "fish_add_path ~/.npm-global/bin\nset -gx PATH $PATH $HOME/go/bin\n"
+		if err := os.WriteFile(filepath.Join(fishDir, "config.fish"), []byte(personal), 0o644); err != nil {
+			t.Fatalf("Failed to write config.fish: %v", err)
+		}
+
+		preserved, err := PreserveFishUserConfig(fishDir)
+		if err != nil {
+			t.Fatalf("Unexpected error: %v", err)
+		}
+		if !preserved {
+			t.Fatal("Expected preserved=true for a non-empty config.fish")
+		}
+
+		dst := filepath.Join(fishDir, "conf.d", "99-gentleman-preexisting-config.fish")
+		data, err := os.ReadFile(dst)
+		if err != nil {
+			t.Fatalf("Expected preserved file to exist: %v", err)
+		}
+		if !strings.Contains(string(data), personal) {
+			t.Errorf("Expected preserved file to contain the original content, got %q", string(data))
+		}
+
+		// The original config.fish itself is left in place; CopyDir is
+		// responsible for overwriting it afterwards. This helper only makes
+		// sure the content survives that overwrite via conf.d/.
+		if _, err := os.Stat(filepath.Join(fishDir, "config.fish")); err != nil {
+			t.Errorf("Expected original config.fish to remain until overwritten: %v", err)
+		}
+	})
+
+	t.Run("does nothing when there is no existing config.fish", func(t *testing.T) {
+		fishDir := t.TempDir()
+
+		preserved, err := PreserveFishUserConfig(fishDir)
+		if err != nil {
+			t.Fatalf("Unexpected error: %v", err)
+		}
+		if preserved {
+			t.Fatal("Expected preserved=false when config.fish does not exist")
+		}
+
+		if _, err := os.Stat(filepath.Join(fishDir, "conf.d")); !os.IsNotExist(err) {
+			t.Errorf("Expected no conf.d directory to be created, err=%v", err)
+		}
+	})
+
+	t.Run("does nothing when config.fish is empty", func(t *testing.T) {
+		fishDir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(fishDir, "config.fish"), []byte("   \n"), 0o644); err != nil {
+			t.Fatalf("Failed to write config.fish: %v", err)
+		}
+
+		preserved, err := PreserveFishUserConfig(fishDir)
+		if err != nil {
+			t.Fatalf("Unexpected error: %v", err)
+		}
+		if preserved {
+			t.Fatal("Expected preserved=false for a blank config.fish")
+		}
+	})
+
+	t.Run("survives a subsequent CopyDir overwrite of config.fish", func(t *testing.T) {
+		fishDir := t.TempDir()
+		personal := "set -gx GENTLEMAN_TEST 1\n"
+		if err := os.WriteFile(filepath.Join(fishDir, "config.fish"), []byte(personal), 0o644); err != nil {
+			t.Fatalf("Failed to write config.fish: %v", err)
+		}
+
+		preserved, err := PreserveFishUserConfig(fishDir)
+		if err != nil || !preserved {
+			t.Fatalf("PreserveFishUserConfig(%q) = (%v, %v), want (true, nil)", fishDir, preserved, err)
+		}
+
+		// Simulate the shipped template being copied over the live fish dir,
+		// the same way stepInstallShell's CopyDir call does.
+		template := t.TempDir()
+		if err := os.WriteFile(filepath.Join(template, "config.fish"), []byte("# shipped default\n"), 0o644); err != nil {
+			t.Fatalf("Failed to write template config.fish: %v", err)
+		}
+		if err := CopyDir(template, fishDir); err != nil {
+			t.Fatalf("CopyDir failed: %v", err)
+		}
+
+		data, err := os.ReadFile(filepath.Join(fishDir, "conf.d", "99-gentleman-preexisting-config.fish"))
+		if err != nil {
+			t.Fatalf("Expected preserved conf.d file to survive CopyDir: %v", err)
+		}
+		if !strings.Contains(string(data), personal) {
+			t.Errorf("Expected preserved content to survive, got %q", string(data))
+		}
+	})
+}
+
 func TestConfigPaths(t *testing.T) {
 	t.Run("should return map of config paths", func(t *testing.T) {
 		paths := ConfigPaths()

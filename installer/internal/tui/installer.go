@@ -740,6 +740,17 @@ func stepInstallShell(m *Model) error {
 				"Failed to copy starship configuration",
 				err)
 		}
+		// Preserve any existing personal config.fish into conf.d/ before it
+		// gets overwritten by the shipped template below - CopyDir merges
+		// conf.d/ rather than replacing it, so this survives the copy and
+		// keeps the user's previous PATH/env/alias lines active. This is in
+		// addition to, not instead of, the general pre-install backup.
+		fishConfigDir := filepath.Join(homeDir, ".config", "fish")
+		if preserved, err := system.PreserveFishUserConfig(fishConfigDir); err != nil {
+			SendLog(stepID, fmt.Sprintf("Warning: could not preserve existing Fish configuration: %v", err))
+		} else if preserved {
+			SendLog(stepID, "Preserved your existing config.fish into conf.d/"+"99-gentleman-preexisting-config.fish")
+		}
 		if err := system.CopyDir(filepath.Join(repoDir, "GentlemanFish", "fish"), filepath.Join(homeDir, ".config", "fish")); err != nil {
 			return wrapStepError("shell", "Install Fish",
 				"Failed to copy Fish configuration",

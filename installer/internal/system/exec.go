@@ -502,6 +502,63 @@ func CreateBackup(configs []string) (string, error) {
 	return backupDir, nil
 }
 
+// fishPreservedConfigName is the conf.d file that receives a user's previous
+// config.fish content. Fish sources every *.fish file under conf.d/
+// automatically, so writing here keeps the user's old PATH/env/alias lines
+// active even after config.fish itself is replaced by the shipped template.
+const fishPreservedConfigName = "99-gentleman-preexisting-config.fish"
+
+// PreserveFishUserConfig saves any existing config.fish found in fishDir
+// into fishDir/conf.d before the caller overwrites config.fish with a fresh
+// template. Unlike a config.fish, files under conf.d/ are preserved by
+// CopyDir (which merges directories instead of replacing them), so this
+// makes the fish install step non-destructive without changing the shipped
+// configuration. See issue #196.
+//
+// Returns (true, nil) when a non-empty config.fish was found and preserved,
+// (false, nil) when there was nothing to preserve, and a non-nil error only
+// on an actual I/O failure - callers should treat that as non-fatal, since
+// the generic pre-install backup (CreateBackup) already covers this file.
+func PreserveFishUserConfig(fishDir string) (bool, error) {
+	configPath := filepath.Join(fishDir, "config.fish")
+
+	info, err := os.Stat(configPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	if info.IsDir() {
+		return false, nil
+	}
+
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		return false, err
+	}
+	if strings.TrimSpace(string(content)) == "" {
+		return false, nil
+	}
+
+	confDir := filepath.Join(fishDir, "conf.d")
+	if err := os.MkdirAll(confDir, 0o755); err != nil {
+		return false, err
+	}
+
+	preserved := "# Preserved by the Gentleman.Dots installer from your previous\n" +
+		"# ~/.config/fish/config.fish before it was replaced.\n" +
+		"# https://github.com/Gentleman-Programming/Gentleman.Dots/issues/196\n\n" +
+		string(content)
+
+	dst := filepath.Join(confDir, fishPreservedConfigName)
+	if err := os.WriteFile(dst, []byte(preserved), 0o644); err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
 // RestoreBackup restores configs from a backup directory
 func RestoreBackup(backupDir string) error {
 	configPaths := ConfigPaths()

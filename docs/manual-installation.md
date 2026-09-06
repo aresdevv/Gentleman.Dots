@@ -373,6 +373,13 @@ cp -rf GentlemanNushell/* ~/Library/Application\ Support/nushell/
 
 #### Fish + Starship
 
+> **Warning:** the last command below overwrites `~/.config/fish/config.fish`
+> wholesale. If you already have a personal `config.fish` (custom `PATH`
+> entries, exported variables, aliases...), back it up first - e.g.
+> `cp ~/.config/fish/config.fish ~/.config/fish/conf.d/99-my-config.fish` -
+> since files under `conf.d/` are sourced automatically and are not touched
+> by this copy.
+
 ```bash
 brew install fish carapace zoxide atuin starship fzf
 mkdir -p ~/.cache/starship
