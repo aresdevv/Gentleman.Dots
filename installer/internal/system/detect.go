@@ -173,3 +173,27 @@ func GetBrewPrefix() string {
 	}
 	return "/home/linuxbrew/.linuxbrew"
 }
+
+// ResolveBrewCommand returns the command to invoke Homebrew with.
+//
+// It prefers the "brew" binary already resolvable on PATH: that is the
+// same check HasBrew/checkBrew performs, so if a caller trusts HasBrew to
+// decide whether to run brew at all, the actual invocation must honor the
+// same resolution - otherwise a non-default install location (for example
+// a per-user "$HOME/.linuxbrew" install, common when Homebrew is used
+// specifically to fill gaps in a distro's native package manager) is
+// genuinely on PATH but GetBrewPrefix's hardcoded guess is not, and the
+// command fails with "no such file or directory" / exit 127 even though
+// Homebrew is installed and working.
+//
+// It falls back to the well-known install-location path only when "brew"
+// is not yet resolvable on PATH - this covers running brew immediately
+// after installing it within the same process (stepInstallHomebrew sources
+// brew's shellenv in a child shell, which does not update this process's
+// own PATH).
+func ResolveBrewCommand() string {
+	if _, err := exec.LookPath("brew"); err == nil {
+		return "brew"
+	}
+	return GetBrewPrefix() + "/bin/brew"
+}

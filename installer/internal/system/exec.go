@@ -263,8 +263,7 @@ func RunSudo(command string, opts *ExecOptions) *ExecResult {
 
 // RunBrew runs a brew command
 func RunBrew(args string, opts *ExecOptions) *ExecResult {
-	brewPath := GetBrewPrefix() + "/bin/brew"
-	return Run(brewPath+" "+args, opts)
+	return Run(ResolveBrewCommand()+" "+args, opts)
 }
 
 // RunPkg runs a Termux pkg command (install packages)
@@ -659,8 +658,7 @@ func RunWithLogs(command string, opts *ExecOptions, onLog LogCallback) *ExecResu
 
 // RunBrewWithLogs runs a brew command with log streaming
 func RunBrewWithLogs(args string, opts *ExecOptions, onLog LogCallback) *ExecResult {
-	brewPath := GetBrewPrefix() + "/bin/brew"
-	return RunWithLogs(brewPath+" "+args, opts, onLog)
+	return RunWithLogs(ResolveBrewCommand()+" "+args, opts, onLog)
 }
 
 // RunSudoWithLogs runs a sudo command with log streaming
