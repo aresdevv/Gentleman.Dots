@@ -58,10 +58,23 @@ if [[ $IS_TERMUX -eq 0 ]]; then
     fi
 fi
 
+# zsh-autocomplete 26.08+ assumes zsh 5.10+ widgets (recent-paths, menu-search).
+# On zsh 5.9 those widgets don't exist, and the plugin draws blank rows above
+# the completion menu (see issue #199). Gate loading it on the zsh version and
+# let oh-my-zsh's standard compinit-based completion (sourced below via
+# oh-my-zsh.sh) take over when the guard fails.
+autoload -Uz is-at-least
+ZSH_AUTOCOMPLETE_SUPPORTED=0
+if is-at-least 5.10 "$ZSH_VERSION"; then
+    ZSH_AUTOCOMPLETE_SUPPORTED=1
+fi
+
 # Zsh plugins - different paths for Termux vs Homebrew
 if [[ $IS_TERMUX -eq 1 ]]; then
     # Termux - plugins installed via pkg
-    [[ -f "$PREFIX/share/zsh-autocomplete/zsh-autocomplete.plugin.zsh" ]] && source "$PREFIX/share/zsh-autocomplete/zsh-autocomplete.plugin.zsh"
+    if [[ $ZSH_AUTOCOMPLETE_SUPPORTED -eq 1 ]]; then
+        [[ -f "$PREFIX/share/zsh-autocomplete/zsh-autocomplete.plugin.zsh" ]] && source "$PREFIX/share/zsh-autocomplete/zsh-autocomplete.plugin.zsh"
+    fi
     [[ -f "$PREFIX/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh" ]] && source "$PREFIX/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
     [[ -f "$PREFIX/share/zsh-autosuggestions/zsh-autosuggestions.zsh" ]] && source "$PREFIX/share/zsh-autosuggestions/zsh-autosuggestions.zsh"
     # Powerlevel10k on Termux - may need manual install
@@ -73,14 +86,18 @@ else
 
     if [[ -n "$BREW_BIN" && -d "$(dirname $BREW_BIN)/share" ]]; then
         BREW_SHARE="$(dirname $BREW_BIN)/share"
-        source_if_exists "$BREW_SHARE/zsh-autocomplete/zsh-autocomplete.plugin.zsh"
+        if [[ $ZSH_AUTOCOMPLETE_SUPPORTED -eq 1 ]]; then
+            source_if_exists "$BREW_SHARE/zsh-autocomplete/zsh-autocomplete.plugin.zsh"
+        fi
         source_if_exists "$BREW_SHARE/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
         source_if_exists "$BREW_SHARE/zsh-autosuggestions/zsh-autosuggestions.zsh"
         source_if_exists "$BREW_SHARE/powerlevel10k/powerlevel10k.zsh-theme"
     fi
 
     # Native Linux package layouts (Arch/Fedora/Debian vary by package).
-    source_if_exists "/usr/share/zsh/plugins/zsh-autocomplete/zsh-autocomplete.plugin.zsh"
+    if [[ $ZSH_AUTOCOMPLETE_SUPPORTED -eq 1 ]]; then
+        source_if_exists "/usr/share/zsh/plugins/zsh-autocomplete/zsh-autocomplete.plugin.zsh"
+    fi
     source_if_exists "/usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
     source_if_exists "/usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
     source_if_exists "/usr/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh"
