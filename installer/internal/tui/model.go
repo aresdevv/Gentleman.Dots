@@ -136,6 +136,9 @@ type Model struct {
 	AvailableBackups []system.BackupInfo // Available backups for restore
 	SelectedBackup   int                 // Selected backup index
 	BackupDir        string              // Last backup directory created
+	// Atomic/immutable distro mode: manual steps the user must run themselves
+	// (sudo package installs are skipped on read-only-root systems)
+	ManualSteps []string
 	// Vim Trainer mode
 	TrainerStats       *trainer.UserStats   // User's training stats
 	TrainerGameState   *trainer.GameState   // Current game session state
@@ -185,6 +188,7 @@ func NewModel() Model {
 		AvailableBackups:        []system.BackupInfo{},
 		SelectedBackup:          0,
 		BackupDir:               "",
+		ManualSteps:             []string{},
 		Program:                 nil, // Will be set after tea.Program is created
 		// Trainer initialization
 		TrainerStats:       nil, // Will be loaded when entering trainer
@@ -239,6 +243,19 @@ func SendLog(stepID string, log string) {
 // SendLogLine is an alias for SendLog for compatibility
 func (m *Model) SendLog(stepID string, log string) {
 	SendLog(stepID, log)
+}
+
+// AddManualStep records a manual step the user needs to run themselves
+// (used on atomic/immutable distros where sudo package installs are
+// skipped). Duplicate entries are ignored so the final summary stays
+// readable even if multiple install steps suggest the same command.
+func (m *Model) AddManualStep(step string) {
+	for _, existing := range m.ManualSteps {
+		if existing == step {
+			return
+		}
+	}
+	m.ManualSteps = append(m.ManualSteps, step)
 }
 
 // GetCurrentOptions returns the options for the current screen
@@ -514,7 +531,8 @@ func (m *Model) SetupInstallSteps() {
 	// Check both Choices.OS and SystemInfo for Termux detection (redundancy)
 	// Must run BEFORE clone and homebrew on Linux so git is available for clone
 	isTermux := m.Choices.OS == "termux" || m.SystemInfo.IsTermux
-	if m.Choices.OS == "linux" && !isTermux {
+	isAtomic := m.SystemInfo.IsAtomic
+	if m.Choices.OS == "linux" && !isTermux && !isAtomic {
 		m.Steps = append(m.Steps, InstallStep{
 			ID:          "deps",
 			Name:        "Install Dependencies",
@@ -529,6 +547,14 @@ func (m *Model) SetupInstallSteps() {
 			Description: "Base packages (pkg)",
 			Status:      StatusPending,
 			Interactive: false, // Termux doesn't need sudo
+		})
+	} else if isAtomic {
+		m.Steps = append(m.Steps, InstallStep{
+			ID:          "deps",
+			Name:        "Install Dependencies",
+			Description: "Base packages (Homebrew, read-only root)",
+			Status:      StatusPending,
+			Interactive: false, // Atomic distros skip sudo entirely; Homebrew needs no password here
 		})
 	} else if m.Choices.OS == "mac" && !m.SystemInfo.HasXcode {
 		m.Steps = append(m.Steps, InstallStep{
@@ -548,8 +574,11 @@ func (m *Model) SetupInstallSteps() {
 	})
 
 	// Homebrew (interactive - first install needs password)
-	// Skip Termux and native package manager Linux distributions.
-	if !m.SystemInfo.HasBrew && !m.SystemInfo.IsTermux && m.SystemInfo.OS != system.OSArch && m.SystemInfo.OS != system.OSFedora {
+	// Skip Termux and native package manager Linux distributions, EXCEPT
+	// atomic distros: their read-only root makes Homebrew (userspace) the
+	// primary package source rather than an optional extra.
+	if !m.SystemInfo.HasBrew && !m.SystemInfo.IsTermux &&
+		(isAtomic || (m.SystemInfo.OS != system.OSArch && m.SystemInfo.OS != system.OSFedora)) {
 		m.Steps = append(m.Steps, InstallStep{
 			ID:          "homebrew",
 			Name:        "Install Homebrew",
@@ -566,7 +595,7 @@ func (m *Model) SetupInstallSteps() {
 			Name:        "Install " + m.Choices.Terminal,
 			Description: "Terminal emulator",
 			Status:      StatusPending,
-			Interactive: m.Choices.OS == "linux", // Linux needs sudo for pacman/apt
+			Interactive: m.Choices.OS == "linux" && !isAtomic, // Atomic: no sudo, handled in executeStep
 		})
 	}
 

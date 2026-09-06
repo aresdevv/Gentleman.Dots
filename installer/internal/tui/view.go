@@ -1093,6 +1093,19 @@ func (m Model) renderComplete() string {
 		s.WriteString("\n")
 	}
 
+	// Manual steps the installer could not perform automatically (mainly on
+	// atomic/immutable distros, where sudo package installs and shell
+	// changes are skipped).
+	if len(m.ManualSteps) > 0 {
+		s.WriteString("\n")
+		s.WriteString(WarningStyle.Render("⚠️  Manual steps required (skipped automatically)"))
+		s.WriteString("\n")
+		for _, step := range m.ManualSteps {
+			s.WriteString(InfoStyle.Render("  • " + step))
+			s.WriteString("\n")
+		}
+	}
+
 	// Shell change instructions
 	shell := m.Choices.Shell
 	shellCmd := shell
