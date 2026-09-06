@@ -22,13 +22,6 @@ if [[ $- == *i* ]]; then
     # Commands to run in interactive sessions can go here
 fi
 
-export LS_COLORS="di=38;5;67:ow=48;5;60:ex=38;5;132:ln=38;5;144:*.tar=38;5;180:*.zip=38;5;180:*.jpg=38;5;175:*.png=38;5;175:*.mp3=38;5;175:*.wav=38;5;175:*.txt=38;5;223:*.sh=38;5;132"
-if [[ "$(uname)" == "Darwin" ]]; then
-  alias ls='ls --color=auto'
-else
-  alias ls='gls --color=auto'
-fi
-
 # Homebrew setup (skip on Termux)
 if [[ $IS_TERMUX -eq 0 ]]; then
     if [[ "$(uname)" == "Darwin" ]]; then
@@ -120,6 +113,20 @@ plugins=(
 )
 
 source $ZSH/oh-my-zsh.sh
+
+# oh-my-zsh's theme-and-appearance.zsh sets its own auto-detected "ls"
+# alias during the source above, so ours must come after it to actually
+# take effect - defining it earlier gets silently overridden.
+export LS_COLORS="di=38;5;67:ow=48;5;60:ex=38;5;132:ln=38;5;144:*.tar=38;5;180:*.zip=38;5;180:*.jpg=38;5;175:*.png=38;5;175:*.mp3=38;5;175:*.wav=38;5;175:*.txt=38;5;223:*.sh=38;5;132"
+if [[ "$(uname)" == "Darwin" ]]; then
+  # BSD ls (macOS native) has no --color=auto; needs GNU ls from
+  # coreutils, installed as "gls" to avoid clashing with the native one.
+  command -v gls &>/dev/null && alias ls='gls --color=auto'
+else
+  # Linux's native ls is already GNU coreutils, so --color=auto works
+  # directly; there is no "gls" to alias to here.
+  alias ls='ls --color=auto'
+fi
 
 export CARAPACE_BRIDGES='zsh,fish,bash,inshellisense'
 zstyle ':completion:*' format $'\e[2;37mCompleting %d\e[m'
