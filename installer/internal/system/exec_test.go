@@ -1,6 +1,7 @@
 package system
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -229,6 +230,41 @@ func TestCopyDir(t *testing.T) {
 		}
 		if string(data) != "prompt" {
 			t.Errorf("Expected copied content 'prompt', got %q", string(data))
+		}
+	})
+
+	t.Run("should skip unix sockets instead of failing the whole copy", func(t *testing.T) {
+		srcDir := filepath.Join(t.TempDir(), "src")
+		dstDir := filepath.Join(t.TempDir(), "dst")
+
+		if err := os.MkdirAll(srcDir, 0o755); err != nil {
+			t.Fatalf("Failed to create source directory: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(srcDir, "config.txt"), []byte("keep me"), 0o644); err != nil {
+			t.Fatalf("Failed to write regular file: %v", err)
+		}
+
+		sockPath := filepath.Join(srcDir, "agent.sock")
+		listener, err := net.Listen("unix", sockPath)
+		if err != nil {
+			t.Skipf("Unix sockets not supported in this environment: %v", err)
+		}
+		defer listener.Close()
+
+		if err := CopyDir(srcDir, dstDir); err != nil {
+			t.Fatalf("Expected CopyDir to skip the socket and succeed, got error: %v", err)
+		}
+
+		data, err := os.ReadFile(filepath.Join(dstDir, "config.txt"))
+		if err != nil {
+			t.Fatalf("Failed to read copied regular file: %v", err)
+		}
+		if string(data) != "keep me" {
+			t.Errorf("Expected copied content 'keep me', got %q", string(data))
+		}
+
+		if _, err := os.Stat(filepath.Join(dstDir, "agent.sock")); !os.IsNotExist(err) {
+			t.Errorf("Expected the socket to be skipped, but found it at destination (err=%v)", err)
 		}
 	})
 }

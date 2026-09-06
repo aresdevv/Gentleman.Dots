@@ -346,6 +346,16 @@ func CopyDir(src, dst string) error {
 			return os.MkdirAll(dstPath, resolvedInfo.Mode())
 		}
 
+		// Skip special files (Unix sockets, FIFOs/named pipes, device
+		// nodes). They have no meaningful "contents" for os.ReadFile to
+		// copy - reading one either errors out or blocks - so copying them
+		// would fail (or hang) and abort the whole backup. It's safe to
+		// leave them out: their presence isn't something a config backup
+		// needs to preserve. See issue #195.
+		if !resolvedInfo.Mode().IsRegular() {
+			return nil
+		}
+
 		// Copy file
 		return CopyFile(path, dstPath)
 	})
