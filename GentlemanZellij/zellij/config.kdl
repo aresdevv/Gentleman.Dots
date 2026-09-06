@@ -672,9 +672,29 @@ scrollback_lines_to_serialize 10000
 // May need to be disabled for certain unsupported terminals
 // (Requires restart)
 // Default: true
-// 
+//
 // styled_underlines false
- 
+
+// Disable the Kitty graphics protocol probe Zellij sends to the host
+// terminal at its own startup (separate from queries it forwards on behalf
+// of programs running inside panes). This config doesn't render images in
+// terminal panes, so the probe buys nothing here while adding one more
+// round-trip to zellij's startup terminal-capability negotiation. That
+// negotiation area is where a confirmed, still-open zellij bug lives: its
+// query-forwarding proxy (used when a pane-side program asks the real
+// terminal something, e.g. an OSC 4 color-palette query, which zellij must
+// relay since the pane doesn't have direct access) can misdeliver an
+// unrelated burst of replies into the pane instead of the one reply that
+// program asked for, and that burst gets printed as literal text. See
+// zellij-org/zellij#5467 and docs/tools.md's "Known Issues" section for the
+// long version. This setting only trims one of zellij's own separate
+// startup queries; it does not touch the forwarding bug itself, and only
+// takes effect on zellij >= 0.45.0, the version that added this option.
+// (Requires restart)
+// Default: true
+//
+support_kitty_graphics_protocol false
+
 // How often in seconds sessions are serialized
 // 
 serialization_interval 10000
