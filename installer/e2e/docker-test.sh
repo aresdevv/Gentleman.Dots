@@ -1,6 +1,6 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # Interactive Docker test runner for Gentleman.Dots installer
-# 
+#
 # Usage:
 #   ./docker-test.sh              # Interactive mode
 #   ./docker-test.sh e2e          # Run all E2E tests (non-interactive)
@@ -8,7 +8,12 @@
 #   ./docker-test.sh run debian   # Run tests for specific image
 #   ./docker-test.sh shell alpine # Open shell in image
 
+# pipefail is required so a failing command inside a pipeline (e.g. the
+# `run_image ... | tee "$test_output_file"` below) fails this script even
+# though `tee` itself always exits 0. `pipefail` is not POSIX `sh`, hence the
+# bash shebang above. See issue #194.
 set -e
+set -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 INSTALLER_DIR="$(dirname "$SCRIPT_DIR")"
