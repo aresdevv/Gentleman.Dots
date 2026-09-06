@@ -25,6 +25,7 @@ type SystemInfo struct {
 	IsWSL     bool
 	IsARM     bool
 	IsTermux  bool
+	IsOmarchy bool // Arch-based Omarchy Linux (https://omarchy.org)
 	HomeDir   string
 	HasBrew   bool
 	HasPkg    bool // Termux package manager
@@ -63,7 +64,11 @@ func Detect() *SystemInfo {
 		info.OSName = "Linux"
 		info.IsWSL = checkWSL()
 
-		if isArchLinux() {
+		if isOmarchy() {
+			info.OS = OSArch
+			info.OSName = "Omarchy"
+			info.IsOmarchy = true
+		} else if isArchLinux() {
 			info.OS = OSArch
 			info.OSName = "Arch Linux"
 		} else if isFedora() {
@@ -93,6 +98,32 @@ func checkWSL() bool {
 func isArchLinux() bool {
 	_, err := os.Stat("/etc/arch-release")
 	return err == nil
+}
+
+// isOmarchy detects Omarchy (https://omarchy.org), an Arch-based Linux
+// distribution that ships its own terminal launchers and keybindings
+// (e.g. Super+Return for a plain terminal, Super+Ctrl+Return for Herdr).
+// Omarchy also has /etc/arch-release, so this must be checked before the
+// generic isArchLinux() branch.
+func isOmarchy() bool {
+	data, err := os.ReadFile("/etc/os-release")
+	if err != nil {
+		return false
+	}
+	return osReleaseIDIsOmarchy(data)
+}
+
+// osReleaseIDIsOmarchy reports whether the given /etc/os-release content
+// declares ID=omarchy. Split out from isOmarchy for testability, since
+// /etc/os-release itself can't be swapped out in a unit test.
+func osReleaseIDIsOmarchy(osRelease []byte) bool {
+	for _, line := range strings.Split(string(osRelease), "\n") {
+		line = strings.TrimSpace(line)
+		if line == `ID=omarchy` || line == `ID="omarchy"` {
+			return true
+		}
+	}
+	return false
 }
 
 func isDebian() bool {

@@ -698,6 +698,22 @@ func installHerdrBinary(m *Model, stepID string) error {
 	return os.Chmod(dest, 0755)
 }
 
+// shellAutostartWM returns the multiplexer identifier to embed in the
+// generated shell autostart block. On Omarchy, independent terminal windows
+// (Ghostty, Foot, ...) each spawn their own interactive shell; an
+// unconditional `herdr` autostart there makes every one of them attach to
+// the same persistent Herdr session instead of starting independently.
+// Omarchy already provides its own explicit launcher and keybinding
+// (Super+Ctrl+Return) for Herdr, so the shell-level autostart is skipped in
+// that case. Other multiplexers (tmux, zellij) and non-Omarchy systems are
+// unaffected.
+func shellAutostartWM(m *Model) string {
+	if m.Choices.WindowMgr == "herdr" && m.SystemInfo.IsOmarchy {
+		return "none"
+	}
+	return m.Choices.WindowMgr
+}
+
 func stepInstallShell(m *Model) error {
 	homeDir := os.Getenv("HOME")
 	repoDir := "Gentleman.Dots"
@@ -741,7 +757,7 @@ func stepInstallShell(m *Model) error {
 		}
 		// Patch config.fish based on WM choice
 		SendLog(stepID, "Configuring shell for window manager...")
-		if err := system.PatchFishForWM(filepath.Join(homeDir, ".config/fish/config.fish"), m.Choices.WindowMgr, m.Choices.InstallNvim); err != nil {
+		if err := system.PatchFishForWM(filepath.Join(homeDir, ".config/fish/config.fish"), shellAutostartWM(m), m.Choices.InstallNvim); err != nil {
 			return wrapStepError("shell", "Install Fish",
 				"Failed to configure config.fish for window manager",
 				err)
@@ -791,7 +807,7 @@ func stepInstallShell(m *Model) error {
 		}
 		// Patch .zshrc based on WM choice
 		SendLog(stepID, "Configuring shell for window manager...")
-		if err := system.PatchZshForWM(filepath.Join(homeDir, ".zshrc"), m.Choices.WindowMgr, m.Choices.InstallNvim); err != nil {
+		if err := system.PatchZshForWM(filepath.Join(homeDir, ".zshrc"), shellAutostartWM(m), m.Choices.InstallNvim); err != nil {
 			return wrapStepError("shell", "Install Zsh",
 				"Failed to configure .zshrc for window manager",
 				err)
@@ -874,7 +890,7 @@ func stepInstallShell(m *Model) error {
 		}
 		// Patch config.nu based on WM choice
 		SendLog(stepID, "Configuring shell for window manager...")
-		if err := system.PatchNushellForWM(filepath.Join(nuDir, "config.nu"), m.Choices.WindowMgr); err != nil {
+		if err := system.PatchNushellForWM(filepath.Join(nuDir, "config.nu"), shellAutostartWM(m)); err != nil {
 			return wrapStepError("shell", "Install Nushell",
 				"Failed to configure config.nu for window manager",
 				err)

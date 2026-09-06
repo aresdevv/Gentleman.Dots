@@ -268,6 +268,58 @@ start_if_needed`
 	})
 }
 
+// TestShellAutostartWM verifies Herdr's shell autostart block is suppressed
+// on Omarchy, since independent terminal windows there (Ghostty, Foot, ...)
+// would otherwise all attach to the same persistent Herdr session instead of
+// starting independently (issue #198). Omarchy provides its own explicit
+// launcher/keybinding for Herdr, so only the shell-level autostart is
+// skipped; other multiplexers and non-Omarchy systems are unaffected.
+func TestShellAutostartWM(t *testing.T) {
+	t.Run("suppresses herdr autostart on Omarchy", func(t *testing.T) {
+		m := &Model{
+			SystemInfo: &system.SystemInfo{IsOmarchy: true},
+			Choices:    UserChoices{WindowMgr: "herdr"},
+		}
+
+		if got := shellAutostartWM(m); got != "none" {
+			t.Errorf("shellAutostartWM() = %q, want \"none\" on Omarchy", got)
+		}
+	})
+
+	t.Run("keeps herdr autostart on non-Omarchy systems", func(t *testing.T) {
+		m := &Model{
+			SystemInfo: &system.SystemInfo{IsOmarchy: false},
+			Choices:    UserChoices{WindowMgr: "herdr"},
+		}
+
+		if got := shellAutostartWM(m); got != "herdr" {
+			t.Errorf("shellAutostartWM() = %q, want \"herdr\" off Omarchy", got)
+		}
+	})
+
+	t.Run("leaves tmux untouched on Omarchy", func(t *testing.T) {
+		m := &Model{
+			SystemInfo: &system.SystemInfo{IsOmarchy: true},
+			Choices:    UserChoices{WindowMgr: "tmux"},
+		}
+
+		if got := shellAutostartWM(m); got != "tmux" {
+			t.Errorf("shellAutostartWM() = %q, want \"tmux\" unaffected by Omarchy guard", got)
+		}
+	})
+
+	t.Run("leaves zellij untouched on Omarchy", func(t *testing.T) {
+		m := &Model{
+			SystemInfo: &system.SystemInfo{IsOmarchy: true},
+			Choices:    UserChoices{WindowMgr: "zellij"},
+		}
+
+		if got := shellAutostartWM(m); got != "zellij" {
+			t.Errorf("shellAutostartWM() = %q, want \"zellij\" unaffected by Omarchy guard", got)
+		}
+	})
+}
+
 // TestStepInstallShellFish tests fish installation step
 func TestStepInstallShellFish(t *testing.T) {
 	t.Run("fish step patches config based on WM choice - none", func(t *testing.T) {
