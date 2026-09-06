@@ -2,7 +2,9 @@ package tui
 
 import (
 	"errors"
+	"os"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/Gentleman-Programming/Gentleman.Dots/installer/internal/system"
@@ -105,6 +107,175 @@ func TestInstallPlatformPackagesDebianWithoutBrewUsesApt(t *testing.T) {
 	}
 	if !reflect.DeepEqual(*calls, expected) {
 		t.Fatalf("calls = %#v, want %#v", *calls, expected)
+	}
+}
+
+// TestFedoraExtraPackagesInstalledViaBrewWhenAvailable proves packages that
+// are not in Fedora's official repos (starship, carapace, lazygit, zellij:
+// none exist there as of Fedora 44) are installed via Homebrew rather than
+// being handed to dnf, and never poison the dnf transaction.
+func TestFedoraExtraPackagesInstalledViaBrewWhenAvailable(t *testing.T) {
+	calls := withPackageCommandMocks(t, nil)
+
+	m := &Model{SystemInfo: &system.SystemInfo{OS: system.OSFedora, HasBrew: true}}
+	result := installPlatformPackages(m, "shell", platformPackages{
+		Fedora:      "fish zoxide atuin",
+		FedoraExtra: "carapace starship",
+	}, nil)
+
+	if result.Error != nil {
+		t.Fatalf("expected install to succeed, got error: %v", result.Error)
+	}
+
+	expected := []packageCommandCall{
+		{runner: "sudo", command: "dnf install -y fish zoxide atuin"},
+		{runner: "brew", command: "install carapace starship"},
+	}
+	if !reflect.DeepEqual(*calls, expected) {
+		t.Fatalf("calls = %#v, want %#v", *calls, expected)
+	}
+
+	for _, c := range *calls {
+		if c.runner == "sudo" && (strings.Contains(c.command, "starship") || strings.Contains(c.command, "carapace")) {
+			t.Fatalf("package not in Fedora's repos leaked into dnf command: %q", c.command)
+		}
+	}
+}
+
+// TestFedoraExtraPackagesSkippedWithoutBrewDoesNotFail proves the installer
+// does not hard-fail when a Fedora user has no Homebrew installed: missing
+// packages are skipped with a non-fatal warning instead of aborting.
+func TestFedoraExtraPackagesSkippedWithoutBrewDoesNotFail(t *testing.T) {
+	calls := withPackageCommandMocks(t, nil)
+
+	var warnings []string
+	m := &Model{SystemInfo: &system.SystemInfo{OS: system.OSFedora, HasBrew: false}}
+	result := installPlatformPackages(m, "shell", platformPackages{
+		Fedora:      "fish zoxide atuin",
+		FedoraExtra: "carapace starship",
+	}, func(line string) {
+		warnings = append(warnings, line)
+	})
+
+	if result.Error != nil {
+		t.Fatalf("expected non-fatal skip, got error: %v", result.Error)
+	}
+
+	expected := []packageCommandCall{
+		{runner: "sudo", command: "dnf install -y fish zoxide atuin"},
+	}
+	if !reflect.DeepEqual(*calls, expected) {
+		t.Fatalf("calls = %#v, want %#v (brew must not be invoked)", *calls, expected)
+	}
+
+	found := false
+	for _, w := range warnings {
+		if strings.Contains(w, "carapace") && strings.Contains(w, "starship") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected a warning mentioning the skipped packages, got logs: %v", warnings)
+	}
+}
+
+// TestFedoraOfficialFailureSkipsExtraPackages proves that when the official
+// dnf install itself fails outright (and no brew fallback applies), the
+// FedoraExtra packages are never attempted and the error propagates.
+func TestFedoraOfficialFailureSkipsExtraPackages(t *testing.T) {
+	calls := withPackageCommandMocks(t, errors.New("dnf failed"))
+
+	m := &Model{SystemInfo: &system.SystemInfo{OS: system.OSFedora, HasBrew: false}}
+	result := installPlatformPackages(m, "shell", platformPackages{
+		Fedora:      "fish zoxide atuin",
+		FedoraExtra: "carapace starship",
+	}, nil)
+
+	if result.Error == nil {
+		t.Fatalf("expected dnf failure to propagate")
+	}
+
+	for _, c := range *calls {
+		if c.runner == "brew" {
+			t.Fatalf("brew must not run when the official dnf install failed: %#v", *calls)
+		}
+	}
+}
+
+// TestFedoraOnlyFedoraExtraStillInstalls proves a step whose Fedora field is
+// entirely empty (all its packages are FedoraExtra-only, e.g. zellij) still
+// attempts the extra-package install instead of silently doing nothing.
+func TestFedoraOnlyFedoraExtraStillInstalls(t *testing.T) {
+	calls := withPackageCommandMocks(t, nil)
+
+	m := &Model{SystemInfo: &system.SystemInfo{OS: system.OSFedora, HasBrew: true}}
+	result := installPlatformPackages(m, "wm", platformPackages{
+		FedoraExtra: "zellij",
+	}, nil)
+
+	if result.Error != nil {
+		t.Fatalf("expected install to succeed, got error: %v", result.Error)
+	}
+
+	expected := []packageCommandCall{
+		{runner: "brew", command: "install zellij"},
+	}
+	if !reflect.DeepEqual(*calls, expected) {
+		t.Fatalf("calls = %#v, want %#v", *calls, expected)
+	}
+}
+
+// TestFedoraPackageListsExcludeKnownInvalidNames statically guards the real
+// production package literals in installer.go against packages verified to
+// not exist in Fedora's official repos as of Fedora 44 (starship, carapace,
+// lazygit, zellij all returned zero results on
+// packages.fedoraproject.org), a bare "npm" (Fedora ships it as the
+// "nodejs-npm" subpackage), and the DNF4-only "@development-tools" group
+// shorthand (DNF5, Fedora's default since Fedora 41, does not recognize
+// it - "dnf group install" must be used instead).
+func TestFedoraPackageListsExcludeKnownInvalidNames(t *testing.T) {
+	src, err := os.ReadFile("installer.go")
+	if err != nil {
+		t.Fatalf("failed to read installer.go: %v", err)
+	}
+	text := string(src)
+
+	interactiveSrc, err := os.ReadFile("interactive.go")
+	if err != nil {
+		t.Fatalf("failed to read interactive.go: %v", err)
+	}
+
+	for _, f := range []struct {
+		name string
+		text string
+	}{
+		{"installer.go", text},
+		{"interactive.go", string(interactiveSrc)},
+	} {
+		if strings.Contains(f.text, "install -y @development-tools") {
+			t.Errorf("%s must not run \"dnf install -y @development-tools\"; DNF5 (Fedora's default dnf) does not recognize that DNF4-only group shorthand - use \"dnf group install\" instead", f.name)
+		}
+		for i, line := range strings.Split(f.text, "\n") {
+			if strings.Contains(line, "dnf install") && strings.Contains(line, "wget") && !strings.Contains(line, "wget2") {
+				t.Errorf("%s:%d: wget was retired from Fedora's repos in favor of wget2 (wget2-wget provides the compat binary): %s", f.name, i+1, strings.TrimSpace(line))
+			}
+		}
+	}
+
+	forbidden := []string{"starship", "carapace", "lazygit", "zellij"}
+	for i, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "Fedora:") {
+			continue
+		}
+		if strings.Contains(trimmed, "npm") && !strings.Contains(trimmed, "nodejs-npm") {
+			t.Errorf("installer.go:%d: Fedora has no standalone \"npm\" package, use \"nodejs-npm\": %s", i+1, trimmed)
+		}
+		for _, name := range forbidden {
+			if strings.Contains(trimmed, name) {
+				t.Errorf("installer.go:%d: %q is not available in Fedora's official repos, use FedoraExtra instead: %s", i+1, name, trimmed)
+			}
+		}
 	}
 }
 

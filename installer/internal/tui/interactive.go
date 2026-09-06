@@ -136,8 +136,11 @@ echo "   (You may be prompted for your password)"
 echo ""
 sudo dnf check-update || true
 echo ""
+echo "📦 Installing the Development Tools group..."
+sudo dnf group install -y "Development Tools"
+echo ""
 echo "📦 Installing base dependencies..."
-sudo dnf install -y @development-tools curl file git wget unzip fontconfig
+sudo dnf install -y curl file git wget2-wget unzip fontconfig
 echo ""
 echo "✅ Dependencies installed successfully!"
 echo ""

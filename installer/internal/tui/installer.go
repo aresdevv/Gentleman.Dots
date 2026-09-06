@@ -247,7 +247,21 @@ func stepInstallDeps(m *Model) error {
 	// Fedora/RHEL
 	if m.SystemInfo.OS == system.OSFedora {
 		result := system.RunSudo("dnf check-update || true", nil) // dnf check-update returns 100 if updates available
-		result = system.RunSudo("dnf install -y @development-tools curl file git wget unzip fontconfig", nil)
+		// "@development-tools" is DNF4 shorthand and is not recognized by
+		// DNF5 (the default dnf on Fedora since Fedora 41, including
+		// Fedora 44): it must be installed via the "group install"
+		// subcommand instead, and kept out of the plain package-install
+		// command below since DNF5 rejects mixing the two forms.
+		result = system.RunSudo(`dnf group install -y "Development Tools"`, nil)
+		if result.Error != nil {
+			return wrapStepError("deps", "Install Dependencies",
+				"Failed to install the Development Tools group on Fedora/RHEL",
+				result.Error)
+		}
+		// wget was retired from Fedora's repos in favor of wget2; the
+		// wget2-wget subpackage provides the "wget" binary for
+		// compatibility with anything that still expects it.
+		result = system.RunSudo("dnf install -y curl file git wget2-wget unzip fontconfig", nil)
 		if result.Error != nil {
 			return wrapStepError("deps", "Install Dependencies",
 				"Failed to install base dependencies on Fedora/RHEL",
@@ -608,8 +622,16 @@ type platformPackages struct {
 	Termux string
 	Brew   string
 	Arch   string
+	// Fedora lists packages available in Fedora's official dnf repos.
 	Fedora string
-	Debian string
+	// FedoraExtra lists packages NOT available in Fedora's official repos
+	// (Fedora has no AUR-like helper). dnf transactions are atomic like
+	// pacman's, so these must never be mixed into Fedora: a single
+	// unresolvable name would abort the whole install, including the
+	// otherwise-valid packages. These are installed via Homebrew when
+	// available, or skipped with a non-fatal warning otherwise.
+	FedoraExtra string
+	Debian      string
 }
 
 var (
@@ -624,8 +646,8 @@ func installPlatformPackages(m *Model, stepID string, packages platformPackages,
 		return runPkgInstallWithLogs(packages.Termux, nil, onLog)
 	case m.SystemInfo.OS == system.OSArch && packages.Arch != "":
 		return runNativeWithBrewFallback("pacman -S --needed --noconfirm "+packages.Arch, packages.Brew, m.SystemInfo.HasBrew, onLog)
-	case m.SystemInfo.OS == system.OSFedora && packages.Fedora != "":
-		return runNativeWithBrewFallback("dnf install -y "+packages.Fedora, packages.Brew, m.SystemInfo.HasBrew, onLog)
+	case m.SystemInfo.OS == system.OSFedora && (packages.Fedora != "" || packages.FedoraExtra != ""):
+		return installFedoraPackages(m, packages, onLog)
 	case (m.SystemInfo.OS == system.OSDebian || m.SystemInfo.OS == system.OSLinux) && !m.SystemInfo.HasBrew && packages.Debian != "":
 		return runSudoWithLogs("apt-get install -y "+packages.Debian, nil, onLog)
 	default:
@@ -645,6 +667,49 @@ func runNativeWithBrewFallback(nativeCommand string, brewPackages string, hasBre
 	}
 
 	return runBrewWithLogs("install "+brewPackages, nil, onLog)
+}
+
+// installFedoraPackages installs the official-repo packages via dnf (with
+// the existing brew fallback if dnf fails and Homebrew is available), then
+// separately handles packages not available in Fedora's repos at all.
+// Packages not in Fedora's repos are NEVER passed to dnf: a single
+// unresolvable name aborts the whole dnf transaction, taking down the
+// otherwise-valid packages with it.
+func installFedoraPackages(m *Model, packages platformPackages, onLog func(string)) *system.ExecResult {
+	result := &system.ExecResult{}
+	if packages.Fedora != "" {
+		result = runNativeWithBrewFallback("dnf install -y "+packages.Fedora, packages.Brew, m.SystemInfo.HasBrew, onLog)
+		if result.Error != nil {
+			return result
+		}
+	}
+
+	if packages.FedoraExtra != "" {
+		installFedoraExtraPackages(m, packages.FedoraExtra, onLog)
+	}
+
+	return result
+}
+
+// installFedoraExtraPackages installs packages that are not available in
+// Fedora's official dnf repositories (e.g. starship, carapace, lazygit,
+// zellij: none of them are packaged for Fedora as of Fedora 44). Fedora has
+// no AUR-like helper, so these are installed via Homebrew when available;
+// otherwise this logs a non-fatal warning and skips them instead of
+// aborting the step.
+func installFedoraExtraPackages(m *Model, extraPackages string, onLog func(string)) {
+	if m.SystemInfo.HasBrew {
+		result := runBrewWithLogs("install "+extraPackages, nil, onLog)
+		if result.Error != nil && onLog != nil {
+			onLog(fmt.Sprintf("Warning: failed to install packages via brew: %v", result.Error))
+		}
+		return
+	}
+
+	if onLog != nil {
+		onLog(fmt.Sprintf("Warning: not available via dnf on Fedora and Homebrew is not installed, skipping: %s", extraPackages))
+		onLog("Install Homebrew or these tools manually: " + extraPackages)
+	}
 }
 
 func installHerdrBinary(m *Model, stepID string) error {
@@ -721,11 +786,12 @@ func stepInstallShell(m *Model) error {
 	case "fish":
 		SendLog(stepID, "Installing Fish shell and plugins...")
 		result := installPlatformPackages(m, stepID, platformPackages{
-			Termux: "fish starship zoxide",
-			Brew:   "fish carapace zoxide atuin starship",
-			Arch:   "fish carapace zoxide atuin starship",
-			Fedora: "fish carapace zoxide atuin starship",
-			Debian: "fish zoxide starship",
+			Termux:      "fish starship zoxide",
+			Brew:        "fish carapace zoxide atuin starship",
+			Arch:        "fish carapace zoxide atuin starship",
+			Fedora:      "fish zoxide atuin",
+			FedoraExtra: "carapace starship",
+			Debian:      "fish zoxide starship",
 		}, func(line string) {
 			SendLog(stepID, line)
 		})
@@ -787,11 +853,12 @@ func stepInstallShell(m *Model) error {
 	case "zsh":
 		SendLog(stepID, "Installing Zsh and plugins...")
 		result := installPlatformPackages(m, stepID, platformPackages{
-			Termux: "zsh starship zoxide",
-			Brew:   "zsh carapace zoxide atuin zsh-autosuggestions zsh-syntax-highlighting zsh-autocomplete powerlevel10k",
-			Arch:   "zsh carapace zoxide atuin zsh-autosuggestions zsh-syntax-highlighting zsh-autocomplete zsh-theme-powerlevel10k",
-			Fedora: "zsh carapace zoxide atuin zsh-autosuggestions zsh-syntax-highlighting starship",
-			Debian: "zsh zoxide starship zsh-autosuggestions zsh-syntax-highlighting",
+			Termux:      "zsh starship zoxide",
+			Brew:        "zsh carapace zoxide atuin zsh-autosuggestions zsh-syntax-highlighting zsh-autocomplete powerlevel10k",
+			Arch:        "zsh carapace zoxide atuin zsh-autosuggestions zsh-syntax-highlighting zsh-autocomplete zsh-theme-powerlevel10k",
+			Fedora:      "zsh zoxide atuin zsh-autosuggestions zsh-syntax-highlighting",
+			FedoraExtra: "carapace starship",
+			Debian:      "zsh zoxide starship zsh-autosuggestions zsh-syntax-highlighting",
 		}, func(line string) {
 			SendLog(stepID, line)
 		})
@@ -843,11 +910,12 @@ func stepInstallShell(m *Model) error {
 	case "nushell":
 		SendLog(stepID, "Installing Nushell and dependencies...")
 		result := installPlatformPackages(m, stepID, platformPackages{
-			Termux: "nushell starship zoxide jq",
-			Brew:   "nushell carapace zoxide atuin jq bash starship",
-			Arch:   "nushell carapace zoxide atuin jq bash starship",
-			Fedora: "nushell carapace zoxide atuin jq bash starship",
-			Debian: "nushell zoxide jq bash starship",
+			Termux:      "nushell starship zoxide jq",
+			Brew:        "nushell carapace zoxide atuin jq bash starship",
+			Arch:        "nushell carapace zoxide atuin jq bash starship",
+			Fedora:      "nushell zoxide atuin jq bash",
+			FedoraExtra: "carapace starship",
+			Debian:      "nushell zoxide jq bash starship",
 		}, func(line string) {
 			SendLog(stepID, line)
 		})
@@ -1028,11 +1096,11 @@ func stepInstallWM(m *Model) error {
 		if !system.CommandExists("zellij") {
 			SendLog(stepID, "Installing Zellij...")
 			result := installPlatformPackages(m, stepID, platformPackages{
-				Termux: "zellij",
-				Brew:   "zellij",
-				Arch:   "zellij",
-				Fedora: "zellij",
-				Debian: "zellij",
+				Termux:      "zellij",
+				Brew:        "zellij",
+				Arch:        "zellij",
+				FedoraExtra: "zellij",
+				Debian:      "zellij",
 			}, func(line string) {
 				SendLog(stepID, line)
 			})
@@ -1133,7 +1201,9 @@ func stepInstallNvim(m *Model) error {
 			Termux: "nodejs",
 			Brew:   "node",
 			Arch:   "nodejs npm",
-			Fedora: "nodejs npm",
+			// Fedora has no standalone "npm" package: npm ships as the
+			// separate "nodejs-npm" subpackage.
+			Fedora: "nodejs nodejs-npm",
 			Debian: "nodejs npm",
 		}, func(line string) {
 			SendLog(stepID, line)
@@ -1154,8 +1224,11 @@ func stepInstallNvim(m *Model) error {
 		Termux: "neovim git clang fzf fd ripgrep bat curl lazygit",
 		Brew:   "nvim git gcc fzf fd ripgrep coreutils bat curl lazygit tree-sitter",
 		Arch:   "neovim git gcc fzf fd ripgrep coreutils bat curl lazygit tree-sitter",
-		Fedora: "neovim git gcc fzf fd-find ripgrep coreutils bat curl lazygit tree-sitter-cli",
-		Debian: "neovim git gcc fzf fd-find ripgrep coreutils bat curl lazygit tree-sitter-cli",
+		// lazygit is not packaged for Fedora (only stale, unofficial COPRs
+		// exist); install it via Homebrew when available instead.
+		Fedora:      "neovim git gcc fzf fd-find ripgrep coreutils bat curl tree-sitter-cli",
+		FedoraExtra: "lazygit",
+		Debian:      "neovim git gcc fzf fd-find ripgrep coreutils bat curl lazygit tree-sitter-cli",
 	}, func(line string) {
 		SendLog(stepID, line)
 	})
