@@ -601,23 +601,34 @@ func stepInstallFont(m *Model) error {
 type platformPackages struct {
 	Termux string
 	Brew   string
-	Arch   string
-	Fedora string
-	Debian string
+	// Arch lists packages available in the official Arch repos (installed
+	// via pacman). AUR-only packages must go in ArchAUR instead: pacman
+	// transactions are atomic, so a single unresolvable name aborts the
+	// whole install and nothing gets installed, even the valid packages.
+	Arch string
+	// ArchAUR lists AUR-only packages, installed via a detected helper
+	// (yay or paru). Installing an AUR helper automatically is out of
+	// scope: if none is found, these are skipped with a non-fatal warning
+	// instead of failing the step.
+	ArchAUR string
+	Fedora  string
+	Debian  string
 }
 
 var (
 	runPkgInstallWithLogs = system.RunPkgInstall
 	runSudoWithLogs       = system.RunSudoWithLogs
 	runBrewWithLogs       = system.RunBrewWithLogs
+	runAURWithLogs        = system.RunWithLogs
+	detectAURHelper       = system.DetectAURHelper
 )
 
 func installPlatformPackages(m *Model, stepID string, packages platformPackages, onLog func(string)) *system.ExecResult {
 	switch {
 	case m.SystemInfo.IsTermux:
 		return runPkgInstallWithLogs(packages.Termux, nil, onLog)
-	case m.SystemInfo.OS == system.OSArch && packages.Arch != "":
-		return runNativeWithBrewFallback("pacman -S --needed --noconfirm "+packages.Arch, packages.Brew, m.SystemInfo.HasBrew, onLog)
+	case m.SystemInfo.OS == system.OSArch && (packages.Arch != "" || packages.ArchAUR != ""):
+		return installArchPackages(m, packages, onLog)
 	case m.SystemInfo.OS == system.OSFedora && packages.Fedora != "":
 		return runNativeWithBrewFallback("dnf install -y "+packages.Fedora, packages.Brew, m.SystemInfo.HasBrew, onLog)
 	case (m.SystemInfo.OS == system.OSDebian || m.SystemInfo.OS == system.OSLinux) && !m.SystemInfo.HasBrew && packages.Debian != "":
@@ -639,6 +650,47 @@ func runNativeWithBrewFallback(nativeCommand string, brewPackages string, hasBre
 	}
 
 	return runBrewWithLogs("install "+brewPackages, nil, onLog)
+}
+
+// installArchPackages installs the official-repo packages via pacman (with
+// the existing brew fallback if pacman fails and Homebrew is available),
+// then separately handles any AUR-only packages. AUR packages are NEVER
+// passed to pacman: they are installed via a detected AUR helper, or
+// skipped with a non-fatal warning if no helper is present.
+func installArchPackages(m *Model, packages platformPackages, onLog func(string)) *system.ExecResult {
+	result := &system.ExecResult{}
+	if packages.Arch != "" {
+		result = runNativeWithBrewFallback("pacman -S --needed --noconfirm "+packages.Arch, packages.Brew, m.SystemInfo.HasBrew, onLog)
+		if result.Error != nil {
+			return result
+		}
+	}
+
+	if packages.ArchAUR != "" {
+		installArchAURPackages(packages.ArchAUR, onLog)
+	}
+
+	return result
+}
+
+// installArchAURPackages installs AUR-only packages using a detected AUR
+// helper (yay or paru). Installing an AUR helper automatically is out of
+// scope for this installer: if none is found, this logs a clear non-fatal
+// warning and skips the AUR-only packages instead of aborting the step.
+func installArchAURPackages(aurPackages string, onLog func(string)) {
+	helper := detectAURHelper()
+	if helper == "" {
+		if onLog != nil {
+			onLog(fmt.Sprintf("Warning: no AUR helper (yay/paru) found, skipping AUR-only packages: %s", aurPackages))
+			onLog(fmt.Sprintf("Install an AUR helper and run: <helper> -S --needed %s", aurPackages))
+		}
+		return
+	}
+
+	result := runAURWithLogs(fmt.Sprintf("%s -S --needed --noconfirm %s", helper, aurPackages), nil, onLog)
+	if result.Error != nil && onLog != nil {
+		onLog(fmt.Sprintf("Warning: failed to install AUR packages via %s: %v", helper, result.Error))
+	}
 }
 
 func installHerdrBinary(m *Model, stepID string) error {
@@ -715,11 +767,12 @@ func stepInstallShell(m *Model) error {
 	case "fish":
 		SendLog(stepID, "Installing Fish shell and plugins...")
 		result := installPlatformPackages(m, stepID, platformPackages{
-			Termux: "fish starship zoxide",
-			Brew:   "fish carapace zoxide atuin starship",
-			Arch:   "fish carapace zoxide atuin starship",
-			Fedora: "fish carapace zoxide atuin starship",
-			Debian: "fish zoxide starship",
+			Termux:  "fish starship zoxide",
+			Brew:    "fish carapace zoxide atuin starship",
+			Arch:    "fish zoxide atuin starship",
+			ArchAUR: "carapace-bin",
+			Fedora:  "fish carapace zoxide atuin starship",
+			Debian:  "fish zoxide starship",
 		}, func(line string) {
 			SendLog(stepID, line)
 		})
@@ -770,11 +823,12 @@ func stepInstallShell(m *Model) error {
 	case "zsh":
 		SendLog(stepID, "Installing Zsh and plugins...")
 		result := installPlatformPackages(m, stepID, platformPackages{
-			Termux: "zsh starship zoxide",
-			Brew:   "zsh carapace zoxide atuin zsh-autosuggestions zsh-syntax-highlighting zsh-autocomplete powerlevel10k",
-			Arch:   "zsh carapace zoxide atuin zsh-autosuggestions zsh-syntax-highlighting zsh-autocomplete zsh-theme-powerlevel10k",
-			Fedora: "zsh carapace zoxide atuin zsh-autosuggestions zsh-syntax-highlighting starship",
-			Debian: "zsh zoxide starship zsh-autosuggestions zsh-syntax-highlighting",
+			Termux:  "zsh starship zoxide",
+			Brew:    "zsh carapace zoxide atuin zsh-autosuggestions zsh-syntax-highlighting zsh-autocomplete powerlevel10k",
+			Arch:    "zsh zoxide atuin zsh-autosuggestions zsh-syntax-highlighting zsh-autocomplete",
+			ArchAUR: "carapace-bin zsh-theme-powerlevel10k",
+			Fedora:  "zsh carapace zoxide atuin zsh-autosuggestions zsh-syntax-highlighting starship",
+			Debian:  "zsh zoxide starship zsh-autosuggestions zsh-syntax-highlighting",
 		}, func(line string) {
 			SendLog(stepID, line)
 		})
@@ -826,11 +880,12 @@ func stepInstallShell(m *Model) error {
 	case "nushell":
 		SendLog(stepID, "Installing Nushell and dependencies...")
 		result := installPlatformPackages(m, stepID, platformPackages{
-			Termux: "nushell starship zoxide jq",
-			Brew:   "nushell carapace zoxide atuin jq bash starship",
-			Arch:   "nushell carapace zoxide atuin jq bash starship",
-			Fedora: "nushell carapace zoxide atuin jq bash starship",
-			Debian: "nushell zoxide jq bash starship",
+			Termux:  "nushell starship zoxide jq",
+			Brew:    "nushell carapace zoxide atuin jq bash starship",
+			Arch:    "nushell zoxide atuin jq bash starship",
+			ArchAUR: "carapace-bin",
+			Fedora:  "nushell carapace zoxide atuin jq bash starship",
+			Debian:  "nushell zoxide jq bash starship",
 		}, func(line string) {
 			SendLog(stepID, line)
 		})

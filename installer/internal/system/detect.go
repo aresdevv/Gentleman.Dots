@@ -141,6 +141,20 @@ func checkBrew() bool {
 	return err == nil
 }
 
+// DetectAURHelper returns the name of an AUR helper already installed on
+// this system ("yay" or "paru"), or "" if neither is found on PATH.
+// Installing an AUR helper automatically is out of scope: callers should
+// degrade gracefully (skip AUR-only packages with a warning) when this
+// returns "".
+func DetectAURHelper() string {
+	for _, helper := range []string{"yay", "paru"} {
+		if CommandExists(helper) {
+			return helper
+		}
+	}
+	return ""
+}
+
 func checkXcode() bool {
 	cmd := exec.Command("xcode-select", "-p")
 	return cmd.Run() == nil
