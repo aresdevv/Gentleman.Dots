@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Gentleman-Programming/Gentleman.Dots/installer/internal/system"
 	"github.com/Gentleman-Programming/Gentleman.Dots/installer/internal/tui"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -63,13 +64,13 @@ func main() {
 		os.Exit(0)
 	}
 
-	if flags.test {
-		setupTestMode()
-	}
-
+	// Dry-run wins over --test: neither the real filesystem/network/package
+	// manager mutations NOR setupTestMode's directory/HOME mutations happen.
 	if flags.dryRun {
-		os.Setenv("GENTLEMAN_DRY_RUN", "1")
+		system.SetDryRun(true)
 		fmt.Println("🧪 Dry-run mode: No actual installations will be performed")
+	} else if flags.test {
+		setupTestMode()
 	}
 
 	// Non-interactive mode: run installation directly with provided flags
@@ -138,6 +139,7 @@ func runNonInteractive(flags *cliFlags) error {
 		InstallNvim:  flags.nvim,
 		InstallFont:  flags.font,
 		CreateBackup: flags.backup,
+		DryRun:       flags.dryRun,
 	}
 
 	fmt.Println("🚀 Gentleman.Dots Non-Interactive Installer")
@@ -148,6 +150,9 @@ func runNonInteractive(flags *cliFlags) error {
 	fmt.Printf("  Neovim:      %v\n", choices.InstallNvim)
 	fmt.Printf("  Font:        %v\n", choices.InstallFont)
 	fmt.Printf("  Backup:      %v\n", choices.CreateBackup)
+	if choices.DryRun {
+		fmt.Printf("  Dry Run:     %v\n", choices.DryRun)
+	}
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	fmt.Println()
 

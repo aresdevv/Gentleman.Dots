@@ -52,6 +52,14 @@ func wrapStepError(stepID, stepName, description string, cause error) error {
 
 // executeStep runs the actual installation for a step
 func executeStep(stepID string, m *Model) error {
+	// Dry-run: never perform a mutating operation (package manager calls,
+	// sudo, network access, repo clone, config copy/patch, backups, shell
+	// change, temp script creation, ...). Report the planned step instead.
+	if m.DryRun {
+		SendLog(stepID, fmt.Sprintf("[dry-run] Would run step '%s' — no changes made", stepID))
+		return nil
+	}
+
 	switch stepID {
 	case "backup":
 		return stepBackupConfigs(m)
@@ -462,11 +470,32 @@ func stepInstallTerminal(m *Model) error {
 		SendLog(stepID, "✓ WezTerm configured")
 
 	case "kitty":
-		if !system.CommandExists("kitty") && m.SystemInfo.OS == system.OSMac {
+		if !system.CommandExists("kitty") {
 			SendLog(stepID, "Installing Kitty...")
-			result := system.RunBrewWithLogs("install --cask kitty", nil, func(line string) {
-				SendLog(stepID, line)
-			})
+			var result *system.ExecResult
+			switch m.SystemInfo.OS {
+			case system.OSMac:
+				result = system.RunBrewWithLogs("install --cask kitty", nil, func(line string) {
+					SendLog(stepID, line)
+				})
+			case system.OSArch:
+				result = system.RunSudoWithLogs("pacman -S --noconfirm kitty", nil, func(line string) {
+					SendLog(stepID, line)
+				})
+			case system.OSFedora:
+				result = system.RunSudoWithLogs("dnf install -y kitty", nil, func(line string) {
+					SendLog(stepID, line)
+				})
+			case system.OSDebian, system.OSLinux:
+				// Kitty ships in the official Debian/Ubuntu repositories.
+				result = system.RunSudoWithLogs("apt-get install -y kitty", nil, func(line string) {
+					SendLog(stepID, line)
+				})
+			default:
+				return wrapStepError("terminal", "Install Kitty",
+					"Unsupported operating system for Kitty installation",
+					fmt.Errorf("OS type: %v", m.SystemInfo.OS))
+			}
 			if result.Error != nil {
 				return wrapStepError("terminal", "Install Kitty",
 					"Failed to install Kitty terminal emulator",
