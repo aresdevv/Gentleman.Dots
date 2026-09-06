@@ -57,7 +57,7 @@ func TestDetect(t *testing.T) {
 				t.Errorf("Expected OSName to be 'macOS', got '%s'", info.OSName)
 			}
 		case "linux":
-			validNames := []string{"Linux", "Arch Linux", "Debian/Ubuntu", "Fedora/RHEL", "Termux"}
+			validNames := []string{"Linux", "Arch Linux", "Omarchy", "Debian/Ubuntu", "Fedora/RHEL", "Termux"}
 			found := false
 			for _, name := range validNames {
 				if info.OSName == name {
@@ -293,6 +293,47 @@ func TestIsTermux(t *testing.T) {
 
 		if !isTermux() {
 			t.Error("Should detect Termux when PREFIX contains 'com.termux'")
+		}
+	})
+}
+
+func TestIsOmarchy(t *testing.T) {
+	t.Run("should not panic", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("isOmarchy panicked: %v", r)
+			}
+		}()
+		_ = isOmarchy()
+	})
+}
+
+func TestOsReleaseIDIsOmarchy(t *testing.T) {
+	t.Run("detects unquoted ID=omarchy", func(t *testing.T) {
+		content := "NAME=\"Omarchy\"\nID=omarchy\nID_LIKE=arch\n"
+		if !osReleaseIDIsOmarchy([]byte(content)) {
+			t.Error("Should detect ID=omarchy")
+		}
+	})
+
+	t.Run("detects quoted ID=\"omarchy\"", func(t *testing.T) {
+		content := "NAME=\"Omarchy\"\nID=\"omarchy\"\nID_LIKE=arch\n"
+		if !osReleaseIDIsOmarchy([]byte(content)) {
+			t.Error("Should detect ID=\"omarchy\"")
+		}
+	})
+
+	t.Run("does not match plain Arch Linux", func(t *testing.T) {
+		content := "NAME=\"Arch Linux\"\nID=arch\n"
+		if osReleaseIDIsOmarchy([]byte(content)) {
+			t.Error("Should not treat plain Arch Linux as Omarchy")
+		}
+	})
+
+	t.Run("does not match ID_LIKE mentioning arch", func(t *testing.T) {
+		content := "NAME=\"Manjaro\"\nID=manjaro\nID_LIKE=arch\n"
+		if osReleaseIDIsOmarchy([]byte(content)) {
+			t.Error("Should not match on ID_LIKE, only exact ID=omarchy")
 		}
 	})
 }
