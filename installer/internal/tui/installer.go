@@ -866,6 +866,14 @@ func shellAutostartWM(m *Model) string {
 	return m.Choices.WindowMgr
 }
 
+// shouldInstallOhMyZsh reports whether Oh My Zsh still needs to be installed
+// under homeDir. Oh My Zsh manages its own Git checkout and self-update
+// cycle, so an existing installation must be left untouched rather than
+// overwritten with the repo's snapshot.
+func shouldInstallOhMyZsh(homeDir string) bool {
+	return !system.PathExists(filepath.Join(homeDir, ".oh-my-zsh"))
+}
+
 func stepInstallShell(m *Model) error {
 	homeDir := os.Getenv("HOME")
 	repoDir := "Gentleman.Dots"
@@ -984,10 +992,28 @@ func stepInstallShell(m *Model) error {
 				"Failed to copy Powerlevel10k configuration",
 				err)
 		}
-		if err := system.CopyDir(filepath.Join(repoDir, "GentlemanZsh", ".oh-my-zsh"), filepath.Join(homeDir, ".oh-my-zsh")); err != nil {
-			return wrapStepError("shell", "Install Zsh",
-				"Failed to copy Oh-My-Zsh directory",
-				err)
+		// Oh My Zsh owns its own Git checkout and update cycle. Overwriting an
+		// existing installation with the bundled snapshot dirties its tracked
+		// files and breaks `omz update` (autostash pop conflicts with
+		// upstream). Only install it when it is genuinely missing.
+		if shouldInstallOhMyZsh(homeDir) {
+			SendLog(stepID, "Installing Oh My Zsh...")
+			ohMyZshDir := filepath.Join(homeDir, ".oh-my-zsh")
+			// KEEP_ZSHRC preserves the .zshrc copied above; RUNZSH/CHSH keep
+			// the official installer non-interactive. See ohmyzsh's own
+			// tools/install.sh for these variables.
+			result := system.RunWithLogs(fmt.Sprintf(
+				`ZSH=%q RUNZSH=no CHSH=no KEEP_ZSHRC=yes sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"`,
+				ohMyZshDir), nil, func(line string) {
+				SendLog(stepID, line)
+			})
+			if result.Error != nil {
+				return wrapStepError("shell", "Install Zsh",
+					"Failed to install Oh My Zsh",
+					result.Error)
+			}
+		} else {
+			SendLog(stepID, "✓ Oh My Zsh already installed, leaving it untouched")
 		}
 		// Termux: Add zsh to $PREFIX/etc/shells so tmux doesn't complain
 		if m.SystemInfo.IsTermux {
