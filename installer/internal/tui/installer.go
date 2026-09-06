@@ -12,6 +12,12 @@ import (
 	"github.com/Gentleman-Programming/Gentleman.Dots/installer/internal/system"
 )
 
+// gentlemanDotsRemoteSubstr identifies the installer's own clone of this
+// repository by its "origin" remote, so a CWD-relative "Gentleman.Dots"
+// directory that merely shares the name is never mistaken for it before
+// deletion. See issue #193.
+const gentlemanDotsRemoteSubstr = "gentleman-programming/gentleman.dots"
+
 // StepError provides context about which step failed and why
 type StepError struct {
 	StepID      string
@@ -108,13 +114,13 @@ func stepCloneRepo(m *Model) error {
 	// Check if already exists
 	if _, err := os.Stat("Gentleman.Dots"); err == nil {
 		SendLog(stepID, "Removing existing Gentleman.Dots directory...")
-		result := system.RunWithLogs("rm -rf Gentleman.Dots", nil, func(line string) {
-			SendLog(stepID, line)
-		})
-		if result.Error != nil {
+		if err := system.SafeRemoveClone("Gentleman.Dots", gentlemanDotsRemoteSubstr); err != nil {
 			return wrapStepError("clone", "Clone Repository",
-				"Failed to remove existing Gentleman.Dots directory",
-				result.Error)
+				"A directory named 'Gentleman.Dots' already exists here but does not look like a "+
+					"disposable clone of this repository (wrong remote, local changes, or unpublished "+
+					"commits). Move or remove it manually, then re-run the installer from a directory "+
+					"that doesn't contain unrelated data named 'Gentleman.Dots'.",
+				err)
 		}
 	}
 
@@ -1196,8 +1202,7 @@ func stepCleanup(m *Model) error {
 	stepID := "cleanup"
 	SendLog(stepID, "Removing temporary files...")
 	// Only remove the cloned repo - no sudo needed
-	result := system.Run("rm -rf Gentleman.Dots", nil)
-	if result.Error != nil {
+	if err := system.SafeRemoveClone("Gentleman.Dots", gentlemanDotsRemoteSubstr); err != nil {
 		// Non-critical error, just log it
 		SendLog(stepID, "Warning: Could not remove temporary directory")
 		return nil
