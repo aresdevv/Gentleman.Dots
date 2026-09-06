@@ -267,6 +267,28 @@ func RunBrew(args string, opts *ExecOptions) *ExecResult {
 	return Run(brewPath+" "+args, opts)
 }
 
+// RunRpmOstree runs an rpm-ostree command (layering packages on atomic
+// Fedora derivatives such as Silverblue/Kinoite/Bazzite). Note this mutates
+// the base image and typically requires a reboot to take effect.
+func RunRpmOstree(args string, opts *ExecOptions) *ExecResult {
+	return Run("rpm-ostree "+args, opts)
+}
+
+// RunRpmOstreeWithLogs runs an rpm-ostree command with log streaming
+func RunRpmOstreeWithLogs(args string, opts *ExecOptions, logFunc func(string)) *ExecResult {
+	return RunWithLogs("rpm-ostree "+args, opts, logFunc)
+}
+
+// RunFlatpak runs a flatpak command
+func RunFlatpak(args string, opts *ExecOptions) *ExecResult {
+	return Run("flatpak "+args, opts)
+}
+
+// RunFlatpakWithLogs runs a flatpak command with log streaming
+func RunFlatpakWithLogs(args string, opts *ExecOptions, logFunc func(string)) *ExecResult {
+	return RunWithLogs("flatpak "+args, opts, logFunc)
+}
+
 // RunPkg runs a Termux pkg command (install packages)
 func RunPkg(args string, opts *ExecOptions) *ExecResult {
 	return Run("pkg "+args, opts)

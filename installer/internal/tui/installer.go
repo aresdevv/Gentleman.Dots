@@ -221,6 +221,29 @@ func stepInstallDeps(m *Model) error {
 		return nil
 	}
 
+	// Atomic/immutable distro (Silverblue, Kinoite, Bazzite, uBlue, ...):
+	// the root filesystem is read-only, so sudo pacman/dnf/apt-get are not
+	// an option. Prefer Homebrew (userspace, no sudo) and otherwise defer to
+	// a manual rpm-ostree layering step the user runs themselves.
+	if m.SystemInfo.IsAtomic {
+		SendLog(stepID, "Atomic distro detected — read-only root, skipping system package manager")
+		if m.SystemInfo.HasBrew {
+			SendLog(stepID, "Installing base dependencies via Homebrew...")
+			result := system.RunBrewWithLogs("install git curl wget unzip fontconfig", nil, func(line string) {
+				SendLog(stepID, line)
+			})
+			if result.Error != nil {
+				// Non-fatal: these tools are commonly preinstalled on Fedora
+				// Atomic base images already.
+				SendLog(stepID, "Warning: some Homebrew packages failed (they may already be provided by the base image)")
+			}
+		} else {
+			SendLog(stepID, "Homebrew not available — skipping base package installation")
+			m.AddManualStep("rpm-ostree install git curl wget unzip fontconfig (reboot required), or install Homebrew first")
+		}
+		return nil
+	}
+
 	// Arch Linux
 	if m.SystemInfo.OS == system.OSArch {
 		result := system.RunSudo("pacman -Syu --noconfirm", nil)
@@ -285,6 +308,10 @@ func stepInstallTerminal(m *Model) error {
 	homeDir := os.Getenv("HOME")
 	repoDir := "Gentleman.Dots"
 	stepID := "terminal"
+
+	if m.SystemInfo.IsAtomic {
+		return stepInstallTerminalAtomic(m, terminal, homeDir, repoDir, stepID)
+	}
 
 	switch terminal {
 	case "alacritty":
@@ -516,6 +543,107 @@ func stepInstallTerminal(m *Model) error {
 	return nil
 }
 
+// atomicTerminalFlatpakIDs maps a terminal choice to its Flathub application
+// ID, for terminals that publish one. Alacritty and Kitty do not currently
+// ship an official Flathub package, so they are intentionally absent here.
+var atomicTerminalFlatpakIDs = map[string]string{
+	"wezterm": "org.wezfurlong.wezterm",
+	"ghostty": "com.mitchellh.ghostty",
+}
+
+// stepInstallTerminalAtomic installs (or reports how to install) a terminal
+// emulator on an atomic/immutable distro, then copies its configuration.
+// The system package manager (pacman/dnf/apt-get) is never invoked here:
+// read-only root makes that impossible. Homebrew (userspace) is tried
+// first; Flatpak is tried next for terminals that publish one; otherwise a
+// manual step is recorded and shown in the final summary. The step always
+// succeeds so the config gets copied and the rest of the installation can
+// continue regardless of whether the binary landed.
+func stepInstallTerminalAtomic(m *Model, terminal, homeDir, repoDir, stepID string) error {
+	installed := system.CommandExists(terminal)
+
+	if !installed {
+		SendLog(stepID, "Atomic distro detected — read-only root, skipping the system package manager")
+
+		if m.SystemInfo.HasBrew {
+			SendLog(stepID, fmt.Sprintf("Trying Homebrew for %s...", terminal))
+			result := system.RunBrewWithLogs("install "+terminal, nil, func(line string) {
+				SendLog(stepID, line)
+			})
+			installed = result.Error == nil
+			if !installed {
+				SendLog(stepID, fmt.Sprintf("Homebrew install of %s failed or is unavailable on this platform", terminal))
+			}
+		}
+
+		if !installed {
+			flatpakID, hasFlatpakID := atomicTerminalFlatpakIDs[terminal]
+			switch {
+			case hasFlatpakID && m.SystemInfo.HasFlatpak:
+				SendLog(stepID, fmt.Sprintf("Trying Flatpak for %s...", terminal))
+				result := system.RunFlatpakWithLogs("install -y flathub "+flatpakID, nil, func(line string) {
+					SendLog(stepID, line)
+				})
+				installed = result.Error == nil
+				if !installed {
+					m.AddManualStep(fmt.Sprintf("flatpak install flathub %s", flatpakID))
+				}
+			case hasFlatpakID:
+				m.AddManualStep(fmt.Sprintf("flatpak install flathub %s (install Flatpak first)", flatpakID))
+			default:
+				m.AddManualStep(fmt.Sprintf("Install %s manually — try: rpm-ostree install %s", terminal, terminal))
+			}
+		}
+
+		if installed {
+			SendLog(stepID, fmt.Sprintf("✓ %s installed", terminal))
+		} else {
+			SendLog(stepID, fmt.Sprintf("ℹ %s was not installed automatically — see the manual steps summary at the end", terminal))
+		}
+	} else {
+		SendLog(stepID, fmt.Sprintf("%s already installed", terminal))
+	}
+
+	SendLog(stepID, fmt.Sprintf("Copying %s configuration...", terminal))
+	if err := copyTerminalConfig(terminal, homeDir, repoDir); err != nil {
+		return wrapStepError("terminal", "Install "+terminal,
+			fmt.Sprintf("Failed to copy %s configuration", terminal), err)
+	}
+	SendLog(stepID, fmt.Sprintf("✓ %s configured", terminal))
+	return nil
+}
+
+// copyTerminalConfig copies the Gentleman.Dots configuration for the given
+// terminal into the user's home directory. It is shared by the atomic
+// install path, where config files are copied regardless of whether the
+// terminal binary itself could be installed automatically.
+func copyTerminalConfig(terminal, homeDir, repoDir string) error {
+	switch terminal {
+	case "alacritty":
+		if err := system.EnsureDir(filepath.Join(homeDir, ".config/alacritty")); err != nil {
+			return err
+		}
+		return system.CopyFile(filepath.Join(repoDir, "alacritty.toml"), filepath.Join(homeDir, ".config/alacritty/alacritty.toml"))
+	case "wezterm":
+		if err := system.EnsureDir(filepath.Join(homeDir, ".config/wezterm")); err != nil {
+			return err
+		}
+		return system.CopyFile(filepath.Join(repoDir, ".wezterm.lua"), filepath.Join(homeDir, ".config/wezterm/wezterm.lua"))
+	case "kitty":
+		if err := system.EnsureDir(filepath.Join(homeDir, ".config/kitty")); err != nil {
+			return err
+		}
+		return system.CopyDir(filepath.Join(repoDir, "GentlemanKitty"), filepath.Join(homeDir, ".config", "kitty"))
+	case "ghostty":
+		if err := system.EnsureDir(filepath.Join(homeDir, ".config/ghostty")); err != nil {
+			return err
+		}
+		return system.CopyDir(filepath.Join(repoDir, "GentlemanGhostty"), filepath.Join(homeDir, ".config", "ghostty"))
+	default:
+		return nil
+	}
+}
+
 func stepInstallFont(m *Model) error {
 	homeDir := os.Getenv("HOME")
 	stepID := "font"
@@ -616,6 +744,8 @@ func installPlatformPackages(m *Model, stepID string, packages platformPackages,
 	switch {
 	case m.SystemInfo.IsTermux:
 		return runPkgInstallWithLogs(packages.Termux, nil, onLog)
+	case m.SystemInfo.IsAtomic:
+		return installPlatformPackagesAtomic(m, packages, onLog)
 	case m.SystemInfo.OS == system.OSArch && packages.Arch != "":
 		return runNativeWithBrewFallback("pacman -S --needed --noconfirm "+packages.Arch, packages.Brew, m.SystemInfo.HasBrew, onLog)
 	case m.SystemInfo.OS == system.OSFedora && packages.Fedora != "":
@@ -630,6 +760,40 @@ func installPlatformPackages(m *Model, stepID string, packages platformPackages,
 			Error: fmt.Errorf("no package manager available for this platform"),
 		}
 	}
+}
+
+// installPlatformPackagesAtomic installs packages for shell plugins, window
+// managers, and Neovim tooling on an atomic/immutable distro. Read-only root
+// rules out pacman/dnf/apt-get entirely, so Homebrew (userspace) is the only
+// automated path; anything it can't cover is recorded as a manual step
+// instead of failing the install outright.
+func installPlatformPackagesAtomic(m *Model, packages platformPackages, onLog func(string)) *system.ExecResult {
+	if m.SystemInfo.HasBrew && packages.Brew != "" {
+		onLog("Atomic distro detected — installing via Homebrew (userspace, no sudo required)")
+		return runBrewWithLogs("install "+packages.Brew, nil, onLog)
+	}
+
+	manual := packages.Fedora
+	if manual == "" {
+		manual = packages.Debian
+	}
+	if manual == "" {
+		manual = packages.Arch
+	}
+
+	onLog("Atomic distro detected — read-only root, skipping system package installation")
+	if manual != "" {
+		onLog("  Install manually after this run: rpm-ostree install " + manual)
+		m.AddManualStep("rpm-ostree install " + manual + " (reboot required)")
+	}
+	if packages.Brew != "" {
+		onLog("  Or install Homebrew first, then: brew install " + packages.Brew)
+		m.AddManualStep("brew install " + packages.Brew)
+	}
+
+	// Not fatal: config files still get copied by the caller. There is
+	// nothing further this step can do automatically without sudo.
+	return &system.ExecResult{}
 }
 
 func runNativeWithBrewFallback(nativeCommand string, brewPackages string, hasBrew bool, onLog func(string)) *system.ExecResult {
@@ -1277,6 +1441,21 @@ fi
 
 		SendLog(stepID, fmt.Sprintf("✓ Configured %s to auto-start in ~/.bashrc", shell))
 		SendLog(stepID, "Close and reopen Termux for changes to take effect")
+		return nil
+	}
+
+	// Atomic/immutable distro: /etc/shells is on the read-only base image, so
+	// neither `usermod` nor `chsh` can persist a new default shell there.
+	// Report the manual command instead of attempting sudo.
+	if m.SystemInfo.IsAtomic {
+		SendLog(stepID, "Atomic distro detected — /etc/shells is read-only, skipping shell change")
+		shellPath := system.Run(fmt.Sprintf("which %s", shellCmd), nil)
+		resolvedShell := shellCmd
+		if shellPath.Error == nil && strings.TrimSpace(shellPath.Output) != "" {
+			resolvedShell = strings.TrimSpace(shellPath.Output)
+		}
+		SendLog(stepID, fmt.Sprintf("ℹ Set your default shell manually: chsh -s %s", resolvedShell))
+		m.AddManualStep(fmt.Sprintf("chsh -s %s", resolvedShell))
 		return nil
 	}
 

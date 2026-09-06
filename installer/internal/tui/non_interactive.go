@@ -56,7 +56,26 @@ func RunNonInteractive(choices UserChoices) error {
 	fmt.Println("✅ Installation complete!")
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
+	printManualStepsSummary(model.ManualSteps)
+
 	return nil
+}
+
+// printManualStepsSummary prints the steps the installer could not perform
+// automatically (mainly on atomic/immutable distros, where sudo package
+// installs and shell changes are skipped) so the user has a clear,
+// actionable checklist instead of silently missing functionality.
+func printManualStepsSummary(steps []string) {
+	if len(steps) == 0 {
+		return
+	}
+
+	fmt.Println()
+	fmt.Println("⚠️  Manual steps required (skipped automatically):")
+	for _, step := range steps {
+		fmt.Printf("  • %s\n", step)
+	}
+	fmt.Println()
 }
 
 // buildStepsForChoices creates the list of steps based on user choices
@@ -74,8 +93,11 @@ func buildStepsForChoices(m *Model) []InstallStep {
 	// Clone repo (after deps so git is available)
 	steps = append(steps, InstallStep{ID: "clone", Name: "Clone Gentleman.Dots repository"})
 
-	// Homebrew (for Mac and Debian/Ubuntu Linux - NOT Fedora/Arch which use native package managers)
-	if m.SystemInfo.OS == system.OSMac || m.SystemInfo.OS == system.OSDebian || m.SystemInfo.OS == system.OSLinux {
+	// Homebrew (for Mac and Debian/Ubuntu Linux - NOT Fedora/Arch which use
+	// native package managers - EXCEPT atomic distros, where read-only root
+	// makes userspace Homebrew the primary package source even on a Fedora
+	// Atomic base).
+	if m.SystemInfo.OS == system.OSMac || m.SystemInfo.OS == system.OSDebian || m.SystemInfo.OS == system.OSLinux || m.SystemInfo.IsAtomic {
 		steps = append(steps, InstallStep{ID: "homebrew", Name: "Install/Update Homebrew"})
 	}
 

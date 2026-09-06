@@ -294,6 +294,24 @@ func getSetShellScript(m *Model) (string, error) {
 		return getSetShellScriptTermux(shellCmd)
 	}
 
+	// Atomic distro: /etc/shells lives on the read-only base image, so
+	// usermod/chsh cannot persist a new default shell there. Print the
+	// manual command instead of attempting a sudo/chsh change.
+	if m.SystemInfo.IsAtomic {
+		script := fmt.Sprintf(`#!/bin/sh
+set -e
+echo ""
+echo "🌀 Atomic distro detected — /etc/shells is read-only, skipping shell change"
+echo ""
+echo "ℹ️  Set your default shell manually:"
+echo "   chsh -s \$(which %s)"
+echo ""
+echo "Press Enter to continue..."
+read dummy
+`, shellCmd)
+		return script, nil
+	}
+
 	brewPrefix := system.GetBrewPrefix()
 
 	script := fmt.Sprintf(`#!/bin/sh
