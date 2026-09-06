@@ -15,8 +15,9 @@ import (
 // gentlemanDotsRemoteSubstr identifies the installer's own clone of this
 // repository by its "origin" remote, so a CWD-relative "Gentleman.Dots"
 // directory that merely shares the name is never mistaken for it before
-// deletion. See issue #193.
-const gentlemanDotsRemoteSubstr = "gentleman-programming/gentleman.dots"
+// deletion. See issue #193. Kept in sync with the clone URL below (this is
+// a personal fork build, so it points at aresdevv's fork, not upstream).
+const gentlemanDotsRemoteSubstr = "aresdevv/gentleman.dots"
 
 // StepError provides context about which step failed and why
 type StepError struct {
@@ -133,7 +134,7 @@ func stepCloneRepo(m *Model) error {
 	}
 
 	SendLog(stepID, "Cloning repository from GitHub...")
-	result := system.RunWithLogs("git clone --progress https://github.com/Gentleman-Programming/Gentleman.Dots.git Gentleman.Dots", nil, func(line string) {
+	result := system.RunWithLogs("git clone --progress --branch personal/all-fixes https://github.com/aresdevv/Gentleman.Dots.git Gentleman.Dots", nil, func(line string) {
 		SendLog(stepID, line)
 	})
 	if result.Error != nil {
