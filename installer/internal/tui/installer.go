@@ -1135,9 +1135,9 @@ func stepInstallShell(m *Model) error {
 		SendLog(stepID, "Installing Zsh and plugins...")
 		result := installPlatformPackages(m, stepID, platformPackages{
 			Termux:      "zsh starship zoxide",
-			Brew:        "zsh carapace zoxide atuin zsh-autosuggestions zsh-syntax-highlighting zsh-autocomplete powerlevel10k",
-			Arch:        "zsh zoxide atuin zsh-autosuggestions zsh-syntax-highlighting zsh-autocomplete",
-			ArchAUR:     "carapace-bin zsh-theme-powerlevel10k",
+			Brew:        "zsh carapace zoxide atuin zsh-autosuggestions zsh-syntax-highlighting zsh-autocomplete starship",
+			Arch:        "zsh zoxide atuin zsh-autosuggestions zsh-syntax-highlighting zsh-autocomplete starship",
+			ArchAUR:     "carapace-bin",
 			Fedora:      "zsh zoxide atuin zsh-autosuggestions zsh-syntax-highlighting",
 			FedoraExtra: "carapace starship",
 			Debian:      "zsh zoxide starship zsh-autosuggestions zsh-syntax-highlighting",
@@ -1162,9 +1162,9 @@ func stepInstallShell(m *Model) error {
 				"Failed to configure .zshrc for window manager",
 				err)
 		}
-		if err := system.CopyFile(filepath.Join(repoDir, "GentlemanZsh/.p10k.zsh"), filepath.Join(homeDir, ".p10k.zsh")); err != nil {
+		if err := system.CopyFile(filepath.Join(repoDir, "starship.toml"), filepath.Join(homeDir, ".config/starship.toml")); err != nil {
 			return wrapStepError("shell", "Install Zsh",
-				"Failed to copy Powerlevel10k configuration",
+				"Failed to copy Starship configuration",
 				err)
 		}
 		// Oh My Zsh owns its own Git checkout and update cycle. Overwriting an
