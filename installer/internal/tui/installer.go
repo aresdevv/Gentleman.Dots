@@ -261,13 +261,23 @@ func stepInstallDeps(m *Model) error {
 
 	// Arch Linux
 	if m.SystemInfo.OS == system.OSArch {
-		result := system.RunSudo("pacman -Syu --noconfirm", nil)
-		if result.Error != nil {
-			return wrapStepError("deps", "Install Dependencies",
-				"Failed to update Arch Linux packages",
-				result.Error)
+		// Omarchy ships a pacman hook that aborts any transaction combining
+		// -S and -u (a full system upgrade), because Omarchy wants system
+		// upgrades to go through its own `omarchy update` (snapshots,
+		// keyrings, Hyprland reload, etc). Installing specific packages with
+		// plain `-S --needed` (no -u) is unaffected, so skip the upgrade and
+		// go straight to installing what's actually needed.
+		if m.SystemInfo.IsOmarchy {
+			SendLog(stepID, "Omarchy detected — skipping 'pacman -Syu' (use 'omarchy update' separately); installing only the required packages.")
+		} else {
+			result := system.RunSudo("pacman -Syu --noconfirm", nil)
+			if result.Error != nil {
+				return wrapStepError("deps", "Install Dependencies",
+					"Failed to update Arch Linux packages",
+					result.Error)
+			}
 		}
-		result = system.RunSudo("pacman -S --needed --noconfirm base-devel curl file git wget unzip fontconfig", nil)
+		result := system.RunSudo("pacman -S --needed --noconfirm base-devel curl file git wget unzip fontconfig", nil)
 		if result.Error != nil {
 			return wrapStepError("deps", "Install Dependencies",
 				"Failed to install base dependencies on Arch Linux",

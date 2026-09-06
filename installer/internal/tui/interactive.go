@@ -117,22 +117,32 @@ func getDepsScript(m *Model) (string, error) {
 	var script string
 
 	if m.SystemInfo.OS == system.OSArch {
-		script = `#!/bin/sh
-set -e
-echo ""
-echo "🔄 Updating Arch Linux packages..."
+		// Omarchy ships a pacman hook that aborts any transaction combining
+		// -S and -u (a full system upgrade): it wants system upgrades to go
+		// through its own `omarchy update` instead. Plain `-S --needed`
+		// (no -u) is unaffected, so Omarchy skips the upgrade line entirely.
+		upgradeStep := `echo "🔄 Updating Arch Linux packages..."
 echo "   (You may be prompted for your password)"
 echo ""
 sudo pacman -Syu --noconfirm
 echo ""
-echo "📦 Installing base dependencies..."
+`
+		if m.SystemInfo.IsOmarchy {
+			upgradeStep = `echo "🔄 Omarchy detected — skipping 'pacman -Syu' (run 'omarchy update' separately if you want a full system upgrade)."
+echo ""
+`
+		}
+		script = fmt.Sprintf(`#!/bin/sh
+set -e
+echo ""
+%s echo "📦 Installing base dependencies..."
 sudo pacman -S --needed --noconfirm base-devel curl file git wget unzip fontconfig
 echo ""
 echo "✅ Dependencies installed successfully!"
 echo ""
 echo "Press Enter to continue..."
 read dummy
-`
+`, upgradeStep)
 	} else if m.SystemInfo.OS == system.OSFedora {
 		// Fedora/RHEL
 		script = `#!/bin/sh
