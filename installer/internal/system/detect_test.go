@@ -90,6 +90,56 @@ func TestCommandExists(t *testing.T) {
 	})
 }
 
+func withFakeExecutablesOnPath(t *testing.T, names ...string) {
+	t.Helper()
+
+	tmpDir := t.TempDir()
+	for _, name := range names {
+		path := filepath.Join(tmpDir, name)
+		if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+			t.Fatalf("failed to create fake executable %q: %v", name, err)
+		}
+	}
+
+	originalPath := os.Getenv("PATH")
+	t.Cleanup(func() {
+		_ = os.Setenv("PATH", originalPath)
+	})
+	if err := os.Setenv("PATH", tmpDir); err != nil {
+		t.Fatalf("failed to set PATH: %v", err)
+	}
+}
+
+func TestDetectAURHelper(t *testing.T) {
+	t.Run("returns empty string when no helper is on PATH", func(t *testing.T) {
+		withFakeExecutablesOnPath(t)
+		if got := DetectAURHelper(); got != "" {
+			t.Errorf("expected no AUR helper detected, got %q", got)
+		}
+	})
+
+	t.Run("detects yay", func(t *testing.T) {
+		withFakeExecutablesOnPath(t, "yay")
+		if got := DetectAURHelper(); got != "yay" {
+			t.Errorf("expected 'yay', got %q", got)
+		}
+	})
+
+	t.Run("detects paru when yay is absent", func(t *testing.T) {
+		withFakeExecutablesOnPath(t, "paru")
+		if got := DetectAURHelper(); got != "paru" {
+			t.Errorf("expected 'paru', got %q", got)
+		}
+	})
+
+	t.Run("prefers yay over paru when both are present", func(t *testing.T) {
+		withFakeExecutablesOnPath(t, "yay", "paru")
+		if got := DetectAURHelper(); got != "yay" {
+			t.Errorf("expected 'yay' to take priority, got %q", got)
+		}
+	})
+}
+
 func TestGetBrewPrefix(t *testing.T) {
 	prefix := GetBrewPrefix()
 
