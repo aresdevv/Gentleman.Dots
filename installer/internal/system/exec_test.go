@@ -1057,3 +1057,68 @@ func TestRunWithLogs(t *testing.T) {
 		}
 	})
 }
+
+// TestRunBrewUsesPathResolvedBrewOverHardcodedPrefix reproduces issue #192:
+// a Homebrew install that is genuinely on PATH (e.g. a per-user
+// "$HOME/.linuxbrew" install) but does not live at GetBrewPrefix's
+// hardcoded guess must still be used, instead of failing with exit 127
+// because RunBrew/RunBrewWithLogs ignored PATH and only tried the
+// hardcoded location.
+func TestRunBrewUsesPathResolvedBrewOverHardcodedPrefix(t *testing.T) {
+	tmpDir := t.TempDir()
+	marker := filepath.Join(tmpDir, "invoked-args")
+	brewScript := "#!/bin/sh\necho \"$@\" > " + marker + "\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(tmpDir, "brew"), []byte(brewScript), 0755); err != nil {
+		t.Fatalf("failed to create fake brew: %v", err)
+	}
+
+	originalPath := os.Getenv("PATH")
+	t.Cleanup(func() { _ = os.Setenv("PATH", originalPath) })
+	// Prepend (not replace) so "sh" is still resolvable: Run/RunWithLogs
+	// shell out via "sh -c", and this test only cares that "brew" itself
+	// resolves through PATH rather than the hardcoded prefix.
+	if err := os.Setenv("PATH", tmpDir+string(os.PathListSeparator)+originalPath); err != nil {
+		t.Fatalf("failed to set PATH: %v", err)
+	}
+
+	t.Run("RunBrewWithLogs", func(t *testing.T) {
+		result := RunBrewWithLogs("install fish carapace zoxide atuin starship", nil, nil)
+		if result.Error != nil {
+			t.Fatalf("expected PATH-resolved brew to succeed, got error: %v (this is #192's exit 127 when Homebrew lives outside GetBrewPrefix's hardcoded guess)", result.Error)
+		}
+		data, err := os.ReadFile(marker)
+		if err != nil {
+			t.Fatalf("fake brew (found via PATH) was never invoked: %v", err)
+		}
+		if got := strings.TrimSpace(string(data)); got != "install fish carapace zoxide atuin starship" {
+			t.Fatalf("fake brew received args %q, want %q", got, "install fish carapace zoxide atuin starship")
+		}
+	})
+
+	t.Run("RunBrew", func(t *testing.T) {
+		_ = os.Remove(marker)
+		result := RunBrew("--version", nil)
+		if result.Error != nil {
+			t.Fatalf("expected PATH-resolved brew to succeed, got error: %v", result.Error)
+		}
+	})
+}
+
+// TestRunBrewFallsBackToHardcodedPrefixWhenBrewNotOnPath preserves the
+// existing behavior needed right after installing Homebrew within the same
+// process: stepInstallHomebrew sources brew's shellenv in a child shell,
+// which does not update this process's own PATH, so RunBrew must still be
+// able to find brew at the well-known install location.
+func TestRunBrewFallsBackToHardcodedPrefixWhenBrewNotOnPath(t *testing.T) {
+	originalPath := os.Getenv("PATH")
+	t.Cleanup(func() { _ = os.Setenv("PATH", originalPath) })
+	if err := os.Setenv("PATH", t.TempDir()); err != nil {
+		t.Fatalf("failed to clear PATH: %v", err)
+	}
+
+	got := ResolveBrewCommand()
+	want := GetBrewPrefix() + "/bin/brew"
+	if got != want {
+		t.Errorf("ResolveBrewCommand() = %q, want %q when brew is not on PATH", got, want)
+	}
+}

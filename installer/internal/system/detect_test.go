@@ -2,6 +2,7 @@ package system
 
 import (
 	"os"
+	"path/filepath"
 	"runtime"
 	"testing"
 )
@@ -108,6 +109,40 @@ func TestGetBrewPrefix(t *testing.T) {
 			if prefix != "/home/linuxbrew/.linuxbrew" {
 				t.Errorf("Expected '/home/linuxbrew/.linuxbrew' on Linux, got '%s'", prefix)
 			}
+		}
+	})
+}
+
+// TestResolveBrewCommand covers issue #192: a Homebrew install that is
+// genuinely on PATH must be preferred over GetBrewPrefix's hardcoded guess,
+// since a non-default install location (e.g. a per-user
+// "$HOME/.linuxbrew" install) would otherwise never be found.
+func TestResolveBrewCommand(t *testing.T) {
+	originalPath := os.Getenv("PATH")
+	t.Cleanup(func() { _ = os.Setenv("PATH", originalPath) })
+
+	t.Run("prefers brew resolvable on PATH over the hardcoded prefix", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(tmpDir, "brew"), []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+			t.Fatalf("failed to create fake brew: %v", err)
+		}
+		if err := os.Setenv("PATH", tmpDir); err != nil {
+			t.Fatalf("failed to set PATH: %v", err)
+		}
+
+		if got := ResolveBrewCommand(); got != "brew" {
+			t.Errorf("ResolveBrewCommand() = %q, want %q (bare command, resolved via PATH)", got, "brew")
+		}
+	})
+
+	t.Run("falls back to the hardcoded prefix when brew is not on PATH", func(t *testing.T) {
+		if err := os.Setenv("PATH", t.TempDir()); err != nil {
+			t.Fatalf("failed to clear PATH: %v", err)
+		}
+
+		want := GetBrewPrefix() + "/bin/brew"
+		if got := ResolveBrewCommand(); got != want {
+			t.Errorf("ResolveBrewCommand() = %q, want %q", got, want)
 		}
 	})
 }
