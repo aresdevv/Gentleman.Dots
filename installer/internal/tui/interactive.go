@@ -26,6 +26,13 @@ type needsExecProcessMsg struct {
 // This suspends the TUI and gives full terminal control to the process
 func runInteractiveStep(stepID string, m *Model) tea.Cmd {
 	return func() tea.Msg {
+		// Dry-run: skip generating/executing the temp script entirely so no
+		// sudo/package-manager/network/shell-change command ever runs.
+		if m.DryRun {
+			SendLog(stepID, fmt.Sprintf("[dry-run] Would run step '%s' — no changes made", stepID))
+			return execFinishedMsg{stepID: stepID, err: nil}
+		}
+
 		script, err := getInteractiveScript(stepID, m)
 		if err != nil {
 			return execFinishedMsg{stepID: stepID, err: fmt.Errorf("failed to get script for %s: %w", stepID, err)}

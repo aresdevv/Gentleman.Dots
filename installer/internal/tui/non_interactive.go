@@ -12,6 +12,14 @@ func RunNonInteractive(choices UserChoices) error {
 	// Enable non-interactive mode for logging
 	SetNonInteractiveMode(true)
 
+	// Thread dry-run explicitly through this path: keep the process-wide
+	// flag (used by helpers created before a Model exists) in sync with the
+	// choice the caller made, and mirror it onto the Model below.
+	system.SetDryRun(choices.DryRun)
+	if choices.DryRun {
+		fmt.Println("🧪 Dry-run mode: no mutating operation will be performed.")
+	}
+
 	// Detect system info
 	sysInfo := system.Detect()
 
@@ -27,6 +35,7 @@ func RunNonInteractive(choices UserChoices) error {
 		SystemInfo: sysInfo,
 		Choices:    choices,
 		LogLines:   []string{},
+		DryRun:     choices.DryRun,
 	}
 
 	// Detect existing configs for backup functionality

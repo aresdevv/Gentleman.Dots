@@ -88,6 +88,7 @@ type UserChoices struct {
 	WindowMgr    string // "tmux", "zellij", "herdr", "none"
 	InstallNvim  bool
 	CreateBackup bool // Whether to backup existing configs
+	DryRun       bool // When true, no mutating operation is performed; steps are only reported
 }
 
 // Model is the main application state
@@ -145,6 +146,9 @@ type Model struct {
 	TrainerMessage     string               // Feedback message to display
 	// Leader key mode (like Vim's <space> leader)
 	LeaderMode bool // True when waiting for next key after <space>
+	// DryRun mirrors system.IsDryRun() at the model level so installation
+	// steps can short-circuit without performing any mutating operation.
+	DryRun bool
 }
 
 // NewModel creates a new Model with initial state
@@ -190,6 +194,7 @@ func NewModel() Model {
 		TrainerInput:       "",
 		TrainerLastCorrect: false,
 		TrainerMessage:     "",
+		DryRun:             system.IsDryRun(),
 	}
 }
 
@@ -274,10 +279,9 @@ func (m Model) GetCurrentOptions() []string {
 		if m.SystemInfo != nil && (m.SystemInfo.OS == system.OSDebian || m.SystemInfo.OS == system.OSLinux) && m.Choices.OS == "linux" {
 			alacrittyLabel = "Alacritty ⏱️  (builds from source, installs Rust ~5-10 min)"
 		}
-		if m.Choices.OS == "mac" {
-			return []string{alacrittyLabel, "WezTerm", "Kitty", "Ghostty", "None", "─────────────", "ℹ️  Learn about terminals"}
-		}
-		return []string{alacrittyLabel, "WezTerm", "Ghostty", "None", "─────────────", "ℹ️  Learn about terminals"}
+		// Kitty ships in the official Arch/Fedora/Debian repositories, so it's
+		// available as a Linux option too (unlike Alacritty/Ghostty edge cases).
+		return []string{alacrittyLabel, "WezTerm", "Kitty", "Ghostty", "None", "─────────────", "ℹ️  Learn about terminals"}
 	case ScreenFontSelect:
 		return []string{"Yes, install Iosevka Term Nerd Font", "No, I already have it"}
 	case ScreenShellSelect:

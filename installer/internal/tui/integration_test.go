@@ -113,7 +113,7 @@ func TestFullInstallationFlow(t *testing.T) {
 
 // TestLinuxFlow tests Linux-specific options
 func TestLinuxFlow(t *testing.T) {
-	t.Run("linux flow should not show Kitty", func(t *testing.T) {
+	t.Run("linux flow should show Kitty", func(t *testing.T) {
 		m := NewModel()
 		m.Screen = ScreenOSSelect
 		m.Cursor = 1 // Linux
@@ -125,12 +125,17 @@ func TestLinuxFlow(t *testing.T) {
 			t.Fatalf("Expected OS 'linux', got '%s'", m.Choices.OS)
 		}
 
-		// Check terminal options don't include Kitty
+		// Check terminal options include Kitty (available via pacman/dnf/apt)
 		options := m.GetCurrentOptions()
+		hasKitty := false
 		for _, opt := range options {
 			if opt == "Kitty" {
-				t.Error("Linux should not have Kitty option")
+				hasKitty = true
+				break
 			}
+		}
+		if !hasKitty {
+			t.Error("Linux should have Kitty option")
 		}
 	})
 }
